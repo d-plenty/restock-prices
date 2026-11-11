@@ -25,7 +25,8 @@ The collector in `collector/` runs once a week, on **Thursday at 1:00 am** (Bris
 and Woolworths' weekly specials start on Wednesday. On **Friday at 1:00 am** it tries again, but only for a shop
 that failed or returned far fewer products than last time.
 
-- It reads the same public pages each shop's own website uses. No accounts and no sign-ins.
+- **Woolworths** comes from [hotprices.org](https://hotprices.org), the open-source tracker that already publishes Woolworths' prices every day (one download, with months of past prices). **Coles** and **Costco** come from the public pages their own websites use. **Aldi** comes from Aldi's public search, word by word across the range.
+- No accounts and no sign-ins.
 - One request at a time, with a pause of about 1.5 seconds between requests. A full run takes a few hours.
 - It says who it is in every request (`RestockPrices/1.0`, with a link here).
 - If a shop refuses (a robot check or "too many requests"), it stops that shop and tries again next time. It
@@ -52,6 +53,8 @@ docker logs restock-prices                                   # what it did
 | `RETRY_DAY` | `fri` | the retry for a shop that failed or came back short |
 | `DELAY_MS` | `1500` | pause between requests to a shop |
 | `GIT_REPO` | `d-plenty/restock-prices` | where to push |
+| `WOOLWORTHS_SOURCE` | `hotprices` | `site` reads Woolworths' own pages instead (Woolworths turns those away) |
+| `ALDI_WORDS` | a list of about 120 | the words Aldi is searched with |
 
 ## Licence
 

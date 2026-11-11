@@ -140,3 +140,21 @@ test('a run writes latest/ and the state, even when the shop stops part way', as
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('woolworths from hotprices: months of past prices at once', () => {
+  const p = woolworths.fromHotprices({ id: '123.0', name: 'Woolworths Milk 2L', isWeighted: false, unit: 'ml', quantity: 2000, priceHistory: [{ date: '2026-11-10', price: 3.1 }, { date: '2026-06-01', price: 2.9 }] });
+  assert.equal(p.store_product_id, '123');
+  assert.equal(p.price.price, 3.1);
+  assert.equal(p.qty, 2000);
+  const state = { products: {} };
+  fold(state, [p], '2026-11-12');
+  assert.deepEqual(state.products['woolworths:123'].prices.map((x) => [x.date, x.price]), [['2026-06-01', 2.9], ['2026-11-10', 3.1]]);
+});
+
+test('aldi searches words and keeps each product once', async () => {
+  const page = { meta: { pagination: { totalCount: 1 } }, data: [{ sku: '1', name: 'Milk 2L', price: { amount: 310 } }] };
+  const http = { get: async () => ({ json: () => page }) };
+  const got = [];
+  for await (const b of aldi.collect(http, () => {})) got.push(...b);
+  assert.equal(got.length, 1);
+});

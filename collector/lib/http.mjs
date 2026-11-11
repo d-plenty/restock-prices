@@ -30,6 +30,7 @@ export class Client {
     this.last = 0;
     this.requests = 0;
     this.blockedInARow = 0;
+    this.verbose = !!o.verbose; // probe: say each request as it goes
   }
 
   cookieHeader() {
@@ -61,6 +62,8 @@ export class Client {
     for (let attempt = 0; attempt <= this.retries; attempt++) {
       await this.wait();
       this.requests++;
+      const t0 = Date.now();
+      if (this.verbose) console.log(`  ${this.shop}: asking ${url.split('?')[0]}${attempt ? ` (try ${attempt + 1})` : ''}…`);
       const ctl = new AbortController();
       const t = setTimeout(() => ctl.abort(), this.timeoutMs);
       let res;
@@ -79,13 +82,16 @@ export class Client {
         });
       } catch (e) {
         clearTimeout(t);
-        lastWhy = e?.name === 'AbortError' ? 'timed out' : String(e?.message || e);
+        lastWhy = e?.name === 'AbortError' ? 'timed out' : String(e?.cause?.code || e?.message || e);
+        if (this.verbose) console.log(`  ${this.shop}: no answer (${lastWhy})`);
         await this.sleep(backoff(attempt));
         continue;
       }
       clearTimeout(t);
       this.keepCookies(res);
       const text = await res.text();
+      if (this.verbose) console.log(`  ${this.shop}: HTTP ${res.status}, ${text.length} characters, ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+      this.onAnswer?.(url, method, res.status, text);
       if (res.status === 403 || res.status === 429 || looksLikeRobotCheck(text)) {
         lastWhy = res.status === 200 ? 'a robot check page' : `HTTP ${res.status}`;
         this.blockedInARow++;

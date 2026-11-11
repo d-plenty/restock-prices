@@ -63,17 +63,24 @@ export function parsePage(j, cat) {
   return { products: out, total: Number(j?.meta?.pagination?.totalCount ?? 0) };
 }
 
+// Aldi's category list needs a store ("service point"), but its search doesn't. So: the search,
+// word by word, across the range (the way the Restock app searches Aldi), each product kept once.
+export const WORDS = (process.env.ALDI_WORDS ||
+  'milk,cheese,yoghurt,butter,cream,eggs,bread,wraps,cereal,oats,muesli,rice,pasta,noodles,flour,sugar,oil,sauce,soup,stock,beans,tomatoes,tuna,salmon,chicken,beef,lamb,pork,sausages,mince,bacon,ham,salami,fish,prawns,vegetables,fruit,apples,bananas,potatoes,onions,salad,frozen,ice cream,pizza,pies,chips,crackers,biscuits,chocolate,lollies,nuts,snacks,muesli bars,coffee,tea,juice,water,soft drink,cordial,energy drink,baby,nappies,wipes,toilet paper,tissues,paper towel,dishwashing,laundry,cleaner,bin bags,foil,cling wrap,shampoo,conditioner,body wash,soap,toothpaste,toothbrush,deodorant,razor,sunscreen,vitamins,pain relief,dog,cat,pet,spices,herbs,honey,jam,spread,peanut butter,vinegar,mayonnaise,mustard,dressing,dips,olives,pickles,curry,tortilla,taco,baking,yeast,cocoa,custard,dessert,jelly,cake,muffins,croissants,bagels,gluten free,vegan,protein,sports drink,kombucha,coconut,almond,soy,oat milk,lactose free,organic').split(',').map((w) => w.trim()).filter(Boolean);
+
 export async function* collect(http, log) {
-  const cats = await categories(http);
-  log(`aldi: ${cats.length} categories`);
-  for (const cat of cats) {
-    for (let offset = 0; offset < 20_000; offset += LIMIT) {
+  log(`aldi: searching ${WORDS.length} words`);
+  const seen = new Set();
+  for (const word of WORDS) {
+    for (let offset = 0; offset < 600; offset += LIMIT) {
       const r = await http.get(
-        `${API}/v3/product-search?currency=AUD&serviceType=walk-in&categoryKey=${encodeURIComponent(cat.key)}&limit=${LIMIT}&offset=${offset}&sort=relevance`,
+        `${API}/v3/product-search?currency=AUD&serviceType=walk-in&q=${encodeURIComponent(word)}&limit=${LIMIT}&offset=${offset}&sort=relevance`,
         { headers: { Accept: 'application/json', Origin: SITE, Referer: `${SITE}/` } },
       );
-      const { products, total } = parsePage(r.json(), cat);
-      yield products;
+      const { products, total } = parsePage(r.json(), { name: word });
+      const fresh = products.filter((p) => !seen.has(p.id));
+      for (const p of fresh) seen.add(p.id);
+      yield fresh;
       if (!products.length || offset + LIMIT >= total) break;
     }
   }

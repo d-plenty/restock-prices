@@ -136,14 +136,12 @@ async function probe(shops) {
   const dir = join(DATA, 'probe');
   mkdirSync(dir, { recursive: true });
   for (const s of shops) {
-    const http = new Client(s, { delayMs: 1500 });
-    const orig = http.get.bind(http);
+    console.log(`probe ${s}: starting`);
+    const http = new Client(s, { delayMs: 1500, retries: 1, timeoutMs: 20_000, verbose: true });
     let n = 0;
-    http.get = async (url, o) => {
-      const res = await orig(url, o);
-      writeFileSync(join(dir, `${s}-${++n}.txt`), `${o?.method || 'GET'} ${url}\nHTTP ${res.status}\n\n${res.text.slice(0, 300_000)}`);
-      return res;
-    };
+    // Every answer, refused ones too, so a shop that says no can be looked at.
+    http.onAnswer = (url, method, status, text) =>
+      writeFileSync(join(dir, `${s}-${++n}.txt`), `${method} ${url}\nHTTP ${status}\n\n${String(text).slice(0, 300_000)}`);
     try {
       const it = SHOP_CODE[s].collect(http, log);
       const first = await it.next();

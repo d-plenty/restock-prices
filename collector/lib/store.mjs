@@ -43,6 +43,18 @@ export function fold(state, found, day) {
     if (f.barcode) cur.barcode = f.barcode; // keep a barcode once known
     if (f.details) cur.details = f.details;
     cur.seen = day;
+    // From hotprices: the product's own dated prices, oldest first. Each goes in on its own day.
+    for (const h of [...(f.history ?? [])].sort((x, y) => (x.date < y.date ? -1 : 1))) {
+      if (!(h.price > 0) || !/^\d{4}-\d{2}-\d{2}$/.test(h.date) || h.date > day) continue;
+      const last0 = cur.prices[cur.prices.length - 1];
+      if (last0 && last0.date > h.date) continue;
+      const pt = { date: h.date, price: h.price };
+      if (!last0 || !same(last0, pt)) {
+        if (last0 && last0.date === h.date) cur.prices[cur.prices.length - 1] = pt;
+        else cur.prices.push(pt);
+        changed++;
+      }
+    }
     const point = { date: day, price: f.price.price };
     if (f.price.was_price && f.price.was_price > f.price.price) point.was_price = f.price.was_price;
     if (f.price.is_special) point.is_special = true;
