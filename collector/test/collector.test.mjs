@@ -158,3 +158,56 @@ test('aldi searches words and keeps each product once', async () => {
   for await (const b of aldi.collect(http, () => {})) got.push(...b);
   assert.equal(got.length, 1);
 });
+
+test('coles: a robot check means hotprices.org for this run', async () => {
+  const pardon = '<html><noscript><title>Pardon Our Interruption</title></noscript></html>';
+  assert.ok(looksLikeRobotCheck(pardon));
+  let asked = 0;
+  const http = {
+    get: async () => { throw new ShopBlocked('coles', 'a robot check page'); },
+    fetch: async (url) => { asked++; assert.match(url, /coles\.compressed/); return new Response(JSON.stringify([{ id: 8150288, name: 'Coles Full Cream Milk 3L', priceHistory: [{ date: '2026-11-10', price: 4.95 }] }])); },
+  };
+  const got = [];
+  for await (const b of coles.collect(http, () => {})) got.push(...b);
+  assert.equal(asked, 1);
+  assert.equal(got[0].image_url, 'https://productimages.coles.com.au/productimages/8/8150288.jpg');
+  assert.equal(got[0].qty, 3000);
+});
+
+test('prices fit in date order, so the price helper phone can send earlier days', async () => {
+  const { put } = await import('../lib/store.mjs');
+  const prices = [{ date: '2026-11-12', price: 3 }];
+  assert.equal(put(prices, { date: '2026-11-09', price: 2.5, is_special: true }), true);
+  assert.equal(put(prices, { date: '2026-11-10', price: 2.5, is_special: true }), false); // same as the day before
+  assert.equal(put(prices, { date: '2026-11-12', price: 3 }), false);
+  assert.deepEqual(prices.map((p) => p.date), ['2026-11-09', '2026-11-12']);
+});
+
+test('price helper: only the right key, only tidy products, folded in at the next run', async () => {
+  const { startHelper, cleanProduct } = await import('../lib/helper.mjs');
+  const today = () => '2026-11-12';
+  assert.equal(cleanProduct('coles', { store_product_id: '../x', name: 'Milk', price: { price: 3 }, day: '2026-11-11' }, '2026-11-12'), undefined);
+  assert.equal(cleanProduct('coles', { store_product_id: '1', name: 'Milk', price: { price: 3 }, day: '2026-10-01' }, '2026-11-12'), undefined);
+  const ok = cleanProduct('coles', { store_product_id: '8150288', name: 'Coles Milk', size: '3L', price: { price: 4.95, was_price: 5.5, is_special: true }, day: '2026-11-10', extra: 'x' }, '2026-11-12');
+  assert.equal(ok.qty, 3000);
+  assert.equal(ok.extra, undefined);
+  const dir = mkdtempSync(join(tmpdir(), 'rph-'));
+  const server = startHelper({ dataDir: dir, key: 'sekrit', port: 0, today, log: () => {} });
+  await new Promise((r) => server.once('listening', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    assert.equal((await fetch(`${base}/helper/status`, { headers: { Authorization: 'Bearer nope' } })).status, 401);
+    assert.equal((await fetch(`${base}/helper/status`, { headers: { Authorization: 'Bearer sekrit' } })).status, 200);
+    const body = { format: 'restock-helper', version: 1, chain: 'coles', products: [{ store_product_id: '8150288', name: 'Coles Milk', size: '3L', price: { price: 4.95 }, day: '2026-11-10' }, { name: 'no id' }] };
+    const r = await fetch(`${base}/helper/prices`, { method: 'POST', headers: { Authorization: 'Bearer sekrit', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    assert.deepEqual(await r.json(), { ok: true, kept: 1 });
+    const { foldInbox } = await import('../collect.mjs');
+    const state = { products: {} };
+    assert.deepEqual(foldInbox(state, 'coles', dir), { count: 1, changed: 1 });
+    assert.deepEqual(state.products['coles:8150288'].prices, [{ date: '2026-11-10', price: 4.95 }]);
+    assert.deepEqual(foldInbox(state, 'coles', dir), { count: 0, changed: 0 }); // taken once
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

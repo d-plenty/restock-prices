@@ -28,6 +28,26 @@ const same = (a, b) =>
   a.price === b.price && (a.was_price ?? null) === (b.was_price ?? null) && !!a.is_special === !!b.is_special && !!a.member_only === !!b.member_only && (a.promo ?? null) === (b.promo ?? null);
 
 /**
+ * One price point into a product's change points (oldest first), in date order: a point on a day
+ * already there replaces it, and one the same as the point before it adds nothing. 0.9.11: in order,
+ * so prices from the price helper phone (days earlier in the week) fit in among the run's own.
+ * Returns whether anything changed.
+ */
+export function put(prices, pt) {
+  let i = prices.length;
+  while (i > 0 && prices[i - 1].date > pt.date) i--;
+  const at = prices[i - 1];
+  if (at && at.date === pt.date) {
+    if (same(at, pt)) return false;
+    prices[i - 1] = pt;
+    return true;
+  }
+  if (at && same(at, pt)) return false;
+  prices.splice(i, 0, pt);
+  return true;
+}
+
+/**
  * Fold one run's products into the state.
  * @param {{ products: Record<string, any> }} state
  * @param {any[]} found  [{ id, chain, store_product_id, name, brand, size, barcode, image_url, qty, qty_unit, details, price: { price, was_price, is_special, member_only, promo } }]
@@ -42,30 +62,18 @@ export function fold(state, found, day) {
     for (const k of ['chain', 'store_product_id', 'name', 'brand', 'size', 'image_url', 'qty', 'qty_unit']) if (f[k] !== undefined && f[k] !== null && f[k] !== '') cur[k] = f[k];
     if (f.barcode) cur.barcode = f.barcode; // keep a barcode once known
     if (f.details) cur.details = f.details;
-    cur.seen = day;
-    // From hotprices: the product's own dated prices, oldest first. Each goes in on its own day.
-    for (const h of [...(f.history ?? [])].sort((x, y) => (x.date < y.date ? -1 : 1))) {
+    if (!cur.seen || day > cur.seen) cur.seen = day;
+    // From hotprices: the product's own dated prices. Each goes in on its own day.
+    for (const h of f.history ?? []) {
       if (!(h.price > 0) || !/^\d{4}-\d{2}-\d{2}$/.test(h.date) || h.date > day) continue;
-      const last0 = cur.prices[cur.prices.length - 1];
-      if (last0 && last0.date > h.date) continue;
-      const pt = { date: h.date, price: h.price };
-      if (!last0 || !same(last0, pt)) {
-        if (last0 && last0.date === h.date) cur.prices[cur.prices.length - 1] = pt;
-        else cur.prices.push(pt);
-        changed++;
-      }
+      if (put(cur.prices, { date: h.date, price: h.price })) changed++;
     }
     const point = { date: day, price: f.price.price };
     if (f.price.was_price && f.price.was_price > f.price.price) point.was_price = f.price.was_price;
     if (f.price.is_special) point.is_special = true;
     if (f.price.member_only) point.member_only = true;
     if (f.price.promo) point.promo = String(f.price.promo).slice(0, 120);
-    const last = cur.prices[cur.prices.length - 1];
-    if (!last || !same(last, point)) {
-      if (last && last.date === day) cur.prices[cur.prices.length - 1] = point;
-      else cur.prices.push(point);
-      changed++;
-    }
+    if (put(cur.prices, point)) changed++;
   }
   return changed;
 }

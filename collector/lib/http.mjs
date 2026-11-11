@@ -121,5 +121,5 @@ const backoff = (n) => Math.min(120_000, 2_000 * 2 ** n) + Math.floor(Math.rando
 
 export function looksLikeRobotCheck(text) {
   const head = String(text).slice(0, 4000);
-  return /Incapsula incident|_Incapsula_Resource|queue-it|px-captcha|Access Denied<\/title>|cf-chl|captcha-delivery|Request unsuccessful\. Incapsula/i.test(head);
+  return /Pardon Our Interruption|Incapsula incident|_Incapsula_Resource|queue-it|px-captcha|Access Denied<\/title>|cf-chl|captcha-delivery|Request unsuccessful\. Incapsula/i.test(head);
 }

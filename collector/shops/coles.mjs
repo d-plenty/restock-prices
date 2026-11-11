@@ -1,6 +1,8 @@
 // Coles: the same public page data Coles' own website loads (Next.js "_next/data" pages), the way
 // the open-source hotprices-au project reads Coles. No sign-in and no branch: Coles' online prices.
 import { readSize } from '../lib/size.mjs';
+import { ShopBlocked } from '../lib/http.mjs';
+import { fromHotpricesFile } from '../lib/hotprices.mjs';
 
 const SITE = 'https://www.coles.com.au';
 const IMG = 'https://productimages.coles.com.au/productimages';
@@ -13,7 +15,10 @@ export function buildIdOf(html) {
 export async function setup(http) {
   const home = await http.get(`${SITE}/`, { headers: { Accept: 'text/html' } });
   const build = buildIdOf(home.text);
-  if (!build) throw new Error("coles: couldn't find the site's build number (the page may have changed)");
+  if (!build) {
+    if (/Pardon Our Interruption|Incapsula|reese84/i.test(home.text)) throw new ShopBlocked('coles', 'a robot check page');
+    throw new Error("coles: couldn't find the site's build number (the page may have changed)");
+  }
   const r = await http.get(`${SITE}/_next/data/${build}/en/browse.json`, { headers: { Accept: 'application/json' } });
   const j = r.json();
   const groups = j?.pageProps?.allProductCategories?.catalogGroupView ?? [];
@@ -65,9 +70,35 @@ export function parseProduct(p, cat) {
   };
 }
 
+// COLES_SOURCE: "auto" (Coles' own site, and hotprices.org for that run if Coles blocks it),
+// "site" (Coles only) or "hotprices" (hotprices.org only).
 export async function* collect(http, log) {
-  const { build, cats } = await setup(http);
+  const source = process.env.COLES_SOURCE || 'auto';
+  if (source === 'hotprices') {
+    yield* fromHotpricesFile('coles', http, log);
+    return;
+  }
+  let build, cats;
+  try {
+    ({ build, cats } = await setup(http));
+  } catch (e) {
+    if (source === 'site') throw e;
+    log(`coles: Coles' site turned the collector away (${e.message}). Using hotprices.org for Coles this time.`);
+    yield* fromHotpricesFile('coles', http, log);
+    return;
+  }
   log(`coles: ${cats.length} categories`);
+  try {
+    yield* fromSite(http, build, cats);
+  } catch (e) {
+    if (source === 'site' || !(e instanceof ShopBlocked)) throw e;
+    // Blocked part way: keep what came from Coles, and fill the rest from hotprices.org.
+    log(`coles: Coles stopped answering part way (${e.message}). Filling in from hotprices.org.`);
+    yield* fromHotpricesFile('coles', http, log);
+  }
+}
+
+async function* fromSite(http, build, cats) {
   for (const cat of cats) {
     for (let page = 1; page < 400; page++) {
       const r = await http.get(`${SITE}/_next/data/${build}/en/browse/${encodeURIComponent(cat.slug)}.json?page=${page}&slug=${encodeURIComponent(cat.slug)}`, {

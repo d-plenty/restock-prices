@@ -2,58 +2,10 @@
 // Woolworths' prices every day (WOOLWORTHS_SOURCE=hotprices): one download, no requests to
 // Woolworths, and months of past prices straight away. WOOLWORTHS_SOURCE=site reads Woolworths' own
 // category pages instead (Woolworths refuses requests that aren't from a browser).
-import { gunzipSync } from 'node:zlib';
 import { readSize } from '../lib/size.mjs';
+import { fromHotprices as fromHp, fromHotpricesFile } from '../lib/hotprices.mjs';
 
-export const HOTPRICES = 'https://hotprices.org/data/latest-canonical.woolies.compressed.json.gz';
-
-/** One hotprices item (heisse-preise "canonical" format) as a product with its own dated prices. */
-export function fromHotprices(it) {
-  if (!it || it.id === undefined || it.id === null || !it.name) return undefined;
-  const id = String(it.id).replace(/\.0$/, '');
-  const hist = (it.priceHistory ?? [])
-    .filter((h) => h && typeof h.price === 'number' && h.price > 0 && typeof h.date === 'string')
-    .map((h) => ({ date: h.date.slice(0, 10), price: h.price }));
-  if (!hist.length) return undefined;
-  const newest = [...hist].sort((a, b) => (a.date < b.date ? 1 : -1))[0];
-  const unit = String(it.unit ?? '').toLowerCase();
-  const qty = typeof it.quantity === 'number' && it.quantity > 0 ? it.quantity : undefined;
-  const fromUnit = qty && (unit === 'g' || unit === 'ml') ? { qty, qty_unit: unit } : qty && unit === 'stk' ? { qty, qty_unit: 'ea' } : {};
-  return {
-    id: `woolworths:${id}`,
-    chain: 'woolworths',
-    store_product_id: id,
-    name: String(it.name).trim(),
-    brand: undefined,
-    size: undefined,
-    barcode: undefined,
-    image_url: undefined,
-    ...(it.isWeighted ? {} : { ...readSize(it.name), ...fromUnit }),
-    price: { price: newest.price },
-    history: hist,
-    details: { category: it.category || undefined, url: it.url || `${SITE}/shop/productdetails/${id}`, source: 'hotprices.org' },
-  };
-}
-
-async function* fromHotpricesFile(http, log) {
-  const res = await (http.fetch ?? fetch)(HOTPRICES, { headers: { 'User-Agent': 'RestockPrices/1.0 (+https://github.com/d-plenty/restock-prices)' } });
-  http.requests = (http.requests ?? 0) + 1;
-  if (!res.ok) throw new Error(`woolworths: hotprices.org answered HTTP ${res.status}`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  const text = (buf[0] === 0x1f && buf[1] === 0x8b ? gunzipSync(buf) : buf).toString('utf8');
-  const items = JSON.parse(text);
-  log(`woolworths: ${items.length} products from hotprices.org`);
-  let batch = [];
-  for (const it of items) {
-    const p = fromHotprices(it);
-    if (p) batch.push(p);
-    if (batch.length >= 1000) {
-      yield batch;
-      batch = [];
-    }
-  }
-  if (batch.length) yield batch;
-}
+export const fromHotprices = (it) => fromHp('woolworths', it);
 
 const SITE = 'https://www.woolworths.com.au';
 const PAGE = 36;
@@ -135,7 +87,7 @@ export function parseProduct(p, cat) {
 
 export async function* collect(http, log) {
   if ((process.env.WOOLWORTHS_SOURCE || 'hotprices') !== 'site') {
-    yield* fromHotpricesFile(http, log);
+    yield* fromHotpricesFile('woolworths', http, log);
     return;
   }
   const cats = await categories(http);

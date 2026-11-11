@@ -4,6 +4,8 @@
 //   node collect.mjs run [shop…] run now (all shops, or the ones named), then publish
 //   node collect.mjs probe [shop] fetch one page per shop, save what came back to /data/probe, and say
 //                                what it understood. Send those files if a shop stops working.
+//   node collect.mjs inbox       fold in what the price helper phone sent (Coles, Woolworths) now, and publish
+// With HELPER_KEY set, it also takes uploads from a Restock price helper phone (lib/helper.mjs).
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -13,6 +15,7 @@ import * as woolworths from './shops/woolworths.mjs';
 import * as coles from './shops/coles.mjs';
 import * as aldi from './shops/aldi.mjs';
 import * as costco from './shops/costco.mjs';
+import { HELPER_SHOPS, readInbox, startHelper } from './lib/helper.mjs';
 
 export const SHOP_CODE = { woolworths, coles, aldi, costco };
 const DATA = process.env.DATA_DIR || '/data';
@@ -57,16 +60,58 @@ export async function runShop(shop, { client, day = today(), root = OUT, stateDi
   const state = readGz(statePath, { products: {} });
   const prev = runs()[shop];
   // A run that stopped early still keeps what it found; it just doesn't count as a good run.
-  const changed = fold(state, [...seen.values()], day);
+  let changed = fold(state, [...seen.values()], day);
+  const helped = foldInbox(state, shop, dataDirOf(stateDir));
+  changed += helped.changed;
+  writeShop(shop, state, day, root, statePath);
+  const short = prev?.good && seen.size < prev.good * SHORT;
+  if (status === 'ok' && short) status = 'short';
+  log(`${shop}: ${seen.size} products, ${changed} new prices, ${http.requests} requests, ${status}${helped.count ? ` (and ${helped.count} prices from the price helper phone)` : ''}`);
+  return { status, count: seen.size, changed, why, good: status === 'ok' ? seen.size : prev?.good };
+}
+
+const dataDirOf = (stateDir) => join(stateDir, '..');
+
+/** The state, its year files and latest/ files, written out. */
+function writeShop(shop, state, day, root, statePath) {
   const old = split(state, day);
   writeGz(statePath, state);
   writeHistory(root, shop, old);
   writeGz(join(root, 'latest', `${shop}.json.gz`), latestFile(shop, state));
   writeGz(join(root, 'latest', `${shop}-details.json.gz`), detailsFile(shop, state));
-  const short = prev?.good && seen.size < prev.good * SHORT;
-  if (status === 'ok' && short) status = 'short';
-  log(`${shop}: ${seen.size} products, ${changed} new prices, ${http.requests} requests, ${status}`);
-  return { status, count: seen.size, changed, why, good: status === 'ok' ? seen.size : prev?.good };
+}
+
+/** What the price helper phone sent for this shop, folded in on the days it saw them. */
+export function foldInbox(state, shop, dataDir = DATA) {
+  if (!HELPER_SHOPS.includes(shop)) return { count: 0, changed: 0 };
+  const { products, done } = readInbox(dataDir, shop);
+  const byDay = new Map();
+  for (const p of products) if (p?.day) byDay.set(p.day, [...(byDay.get(p.day) ?? []), p]);
+  let changed = 0;
+  for (const d of [...byDay.keys()].sort()) changed += fold(state, byDay.get(d), d);
+  done();
+  return { count: products.length, changed };
+}
+
+/** `inbox`: fold in the price helper's prices now, without asking the shops, and publish. */
+async function inboxNow() {
+  const r = runs();
+  for (const shop of HELPER_SHOPS.filter((s) => SHOPS.includes(s))) {
+    const statePath = join(STATE, `${shop}.json.gz`);
+    const state = readGz(statePath, { products: {} });
+    const { count, changed } = foldInbox(state, shop);
+    if (!count) {
+      log(`${shop}: nothing from the price helper phone yet`);
+      continue;
+    }
+    writeShop(shop, state, today(), OUT, statePath);
+    log(`${shop}: ${count} prices from the price helper phone, ${changed} new`);
+  }
+  try {
+    publish(r);
+  } catch (e) {
+    log(`publish failed: ${e.message}`);
+  }
 }
 
 function summary(r) {
@@ -157,6 +202,7 @@ async function probe(shops) {
 
 /** Wait for RUN_DAY / RETRY_DAY at RUN_TIME (container time zone), once each per day. */
 async function schedule() {
+  startHelper({ dataDir: DATA, today, log });
   log(`waiting: ${SHOPS.join(', ')} every ${RUN_DAY} at ${RUN_TIME}, retry ${RETRY_DAY} for any shop that failed or came back short`);
   let done = '';
   for (;;) {
@@ -185,5 +231,6 @@ const named = rest.map((s) => s.toLowerCase()).filter((s) => SHOP_CODE[s]);
 if (import.meta.url === `file://${process.argv[1]}`) {
   if (cmd === 'run') await runNow(named.length ? named : SHOPS);
   else if (cmd === 'probe') await probe(named.length ? named : SHOPS);
+  else if (cmd === 'inbox') await inboxNow();
   else await schedule();
 }

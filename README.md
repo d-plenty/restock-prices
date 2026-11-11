@@ -25,13 +25,17 @@ The collector in `collector/` runs once a week, on **Thursday at 1:00 am** (Bris
 and Woolworths' weekly specials start on Wednesday. On **Friday at 1:00 am** it tries again, but only for a shop
 that failed or returned far fewer products than last time.
 
-- **Woolworths** comes from [hotprices.org](https://hotprices.org), the open-source tracker that already publishes Woolworths' prices every day (one download, with months of past prices). **Coles** and **Costco** come from the public pages their own websites use. **Aldi** comes from Aldi's public search, word by word across the range.
+- **Woolworths** comes from [hotprices.org](https://hotprices.org), the open-source tracker that already publishes Woolworths' prices every day (one download, with months of past prices). **Coles** comes from the public pages Coles' own website uses, and from hotprices.org for that run when Coles turns the collector away. **Costco** comes from the public pages its website uses. **Aldi** comes from Aldi's public search, word by word across the range.
 - No accounts and no sign-ins.
 - One request at a time, with a pause of about 1.5 seconds between requests. A full run takes a few hours.
 - It says who it is in every request (`RestockPrices/1.0`, with a link here).
 - If a shop refuses (a robot check or "too many requests"), it stops that shop and tries again next time. It
   never tries to get around a shop's checks.
 - Stock isn't collected: it's only meaningful for your own branch, which each phone checks itself.
+- **A price helper phone** (Restock 0.9.11 and later) can add to Coles and Woolworths: a spare Android phone
+  left on its charger searches about 500 everyday things through the week, the first page of results each
+  time, about one search every 10 minutes, and sends the products and shelf prices it saw to the collector's
+  helper address (port 8790, with `HELPER_KEY`). They're folded in at the next run, on the days they were seen.
 
 ## Running it (Docker)
 
@@ -43,6 +47,7 @@ still collects, and keeps the files in its volume under `/data/out`.
 docker exec restock-prices node collect.mjs run              # all shops now
 docker exec restock-prices node collect.mjs run coles        # one shop now
 docker exec restock-prices node collect.mjs probe coles      # one page, saved to /data/probe, to see what a shop sends
+docker exec restock-prices node collect.mjs inbox            # fold in the price helper phone's prices now, and publish
 docker logs restock-prices                                   # what it did
 ```
 
@@ -54,7 +59,10 @@ docker logs restock-prices                                   # what it did
 | `DELAY_MS` | `1500` | pause between requests to a shop |
 | `GIT_REPO` | `d-plenty/restock-prices` | where to push |
 | `WOOLWORTHS_SOURCE` | `hotprices` | `site` reads Woolworths' own pages instead (Woolworths turns those away) |
+| `COLES_SOURCE` | `auto` | `auto`: Coles' site, hotprices.org if Coles blocks it. `site` or `hotprices` for one only |
 | `ALDI_WORDS` | a list of about 120 | the words Aldi is searched with |
+| `HELPER_KEY` | (none) | turns on the price helper's address; the phone sends it as its key |
+| `HELPER_PORT` | `8790` | the price helper's port |
 
 ## Licence
 
