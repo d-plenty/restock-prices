@@ -1,0 +1,21 @@
+# Restock prices collector. In Dockge: + Compose, name it restock-prices, paste this, fill in
+# GITHUB_TOKEN, then Deploy. It waits and runs every Thursday at 1:00 am (Brisbane time), and
+# again on Friday at 1:00 am only for a shop that failed or came back short.
+services:
+  restock-prices:
+    image: ghcr.io/d-plenty/restock-prices:latest
+    container_name: restock-prices
+    restart: unless-stopped
+    environment:
+      - TZ=Australia/Brisbane
+      - SHOPS=woolworths,coles,aldi,costco   # Costco's website terms ask people not to collect its listings. Remove costco to leave it out.
+      - RUN_DAY=thu
+      - RUN_TIME=01:00
+      - RETRY_DAY=fri
+      - DELAY_MS=1500                        # pause between requests to a shop, in milliseconds
+      - GIT_REPO=d-plenty/restock-prices
+      - GITHUB_TOKEN=                        # a fine-grained token: this repo only, Contents read and write
+    volumes:
+      - restock-prices-data:/data
+volumes:
+  restock-prices-data: null

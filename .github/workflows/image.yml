@@ -1,0 +1,52 @@
+name: Collector image
+
+# Builds the collector (collector/) and publishes ghcr.io/<owner>/restock-prices:latest. Runs when
+# the collector's code changes on main, or by hand from the Actions tab. The weekly price files the
+# collector pushes (latest/, history/, STATUS.md) never start a build.
+
+on:
+  push:
+    branches: [main]
+    paths: ['collector/**', '.github/workflows/image.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: collector-image
+  cancel-in-progress: true
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm test
+        working-directory: collector
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image name
+        id: meta
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/restock-prices" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: collector
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.image }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.description=Weekly Australian supermarket price collector for Restock
+            org.opencontainers.image.licenses=GPL-3.0-only

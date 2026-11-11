@@ -1,0 +1,13 @@
+{
+  "name": "restock-prices-collector",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Weekly Australian supermarket price collector for Restock",
+  "license": "GPL-3.0-only",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node collect.mjs",
+    "test": "node --test test/collector.test.mjs"
+  }
+}
