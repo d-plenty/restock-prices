@@ -2,8 +2,8 @@
 
 Australian supermarket prices for [Restock](https://github.com/d-plenty/Restock): Coles, Woolworths, Aldi and
 Costco, collected every Thursday and added to every night from the prices Restock phones send back. One file per
-shop with products, sizes, barcodes (where the shop shows them) and price history. Restock's **Judge new items
-from day one** (Settings → Prices and deals) uses it to know a product's usual price and usual sale price straight
+shop with products, sizes, barcodes (where the shop shows them) and price history. Restock's **Shared prices**
+(Settings → Privacy and sharing) uses it to know a product's usual price and usual sale price straight
 away. Phones download only the shops they use, for 8 weeks, 6 months or 12 months, weekly or every day.
 
 Not affiliated with any shop. Read [NOTICE-DATA.md](NOTICE-DATA.md) before using the data.
