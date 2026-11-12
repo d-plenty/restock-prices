@@ -198,7 +198,7 @@ img{max-width:100%;border-radius:8px;border:1px solid #e2dccd;margin:6px 0}butto
       `<p><a href="/feedback/inbox">← All feedback</a></p><h1>${esc(KINDS[x.kind] ?? x.kind)}</h1>
 <p class="s">${esc(new Date(x.at).toLocaleString('en-AU', { timeZone: process.env.TZ || 'Australia/Brisbane' }))} · ${esc(x.platform ?? '')} · Restock ${esc(x.app ?? '?')} · ${esc(x.device ?? '')}${x.screen ? ` · sent from ${esc(x.screen)}` : ''}</p>
 <pre>${esc(x.message)}</pre>
-${x.email ? `<p>Wants a reply: <a href="mailto:${esc(x.email)}">${esc(x.email)}</a></p>` : '<p class="s">No email left: they didn’t ask for a reply.</p>'}
+${/* Cloudflare's email hiding turns an address into a script this page's CSP won't run; email_off keeps it as it is. */ ''}${x.email ? `<p>Wants a reply: <!--email_off--><a href="mailto:${esc(x.email)}">${esc(x.email)}</a> <span class="s">(${esc(x.email)})</span><!--/email_off--></p>` : '<p class="s">No email left: they didn’t ask for a reply.</p>'}
 ${(x.screenshots ?? []).map((n) => `<a href="/feedback/inbox/${esc(id)}/${esc(n)}"><img src="/feedback/inbox/${esc(id)}/${esc(n)}" alt="Screenshot"></a>`).join('')}
 <h2>Diagnostics</h2>${x.diagnostics ? `<pre>${esc(JSON.stringify(x.diagnostics, null, 2))}</pre>` : '<p class="s">They chose not to attach diagnostics.</p>'}
 <form method="post" action="/feedback/inbox/${esc(id)}/done"><button>${x.done ? 'Mark as not done' : 'Mark as done'}</button></form>`,

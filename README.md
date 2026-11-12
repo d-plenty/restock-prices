@@ -44,11 +44,12 @@ that failed or returned far fewer products than last time.
   the same day, the shop's own reading is kept: it has the "was" price, special and member flags, which
   hotprices.org's files don't.
 
-## Prices from phones (Send prices back)
+## Prices from phones (Shared prices)
 
 Restock 0.9.14 and later send the shelf prices their searches and price checks read from Coles, Woolworths, Aldi
-and Costco here, to `https://<this address>/share/prices`, unless the person turned **Send prices back** off
-(Settings → Privacy and sharing). Only what the shop's website said: never a price typed in by hand, and nothing
+and Costco here, to `https://<this address>/share/prices`, unless the person turned **Shared prices** off
+(Settings → Privacy and sharing; it was called Send prices back in 0.9.14). Only what the shop's website said:
+never a price typed in by hand, never a price synced from another of the household's phones (0.10.0), and nothing
 about the person, just a random number per install.
 
 There's no key (a free app can't keep one secret), so every price is checked instead:
@@ -57,11 +58,13 @@ There's no key (a free app can't keep one secret), so every price is checked ins
 - **every night at 3:00 am** (`NIGHTLY_TIME`) they're added to the shops' history and the files are published. A phone never replaces the collector's or the helper phone's own reading for a day, and never renames a product the collector knows;
 - a price far from the last known one (under 35% or over 2.5 times it), or a product the collector hasn't seen, waits until a second phone sends the same price, for up to 14 days.
 
-They wait in `/data/phones/<shop>.ndjson` (and `<shop>-held.ndjson`) until then.
+They wait in `/data/phones/<shop>.ndjson` (and `<shop>-held.ndjson`) until then. Every post is logged
+(`docker logs restock-prices`), for example `share: 34 coles prices from a phone (12 posts, 410 prices today)`,
+and STATUS.md's **From phones** column shows what the last nightly run added.
 
 ## Feedback from the app
 
-Restock's **Settings → Feedback** (on phones, the web page and the iPhone web app) sends here, to
+Restock's **Settings → Send feedback** (on phones, the web page and the iPhone web app) sends here, to
 `https://<this address>/feedback`: what it's about, the message, up to 3 screenshots, diagnostics (unless the person
 turned them off) and an email only if they want a reply. A phone can send 5 a day.
 
@@ -69,6 +72,9 @@ turned them off) and an email only if they want a reply. A phone can send 5 a da
 - **Read them at `https://<this address>/feedback/inbox`**. The browser asks for a password: any user name, and
   `FEEDBACK_PASSWORD` from the container's settings. Open one to see its screenshots and diagnostics, and mark it done.
 - Nothing is sent anywhere else.
+- Email addresses in the inbox are marked so Cloudflare's *Email Address Obfuscation* leaves them alone. If you
+  still see `[email protected]`, turn that off for this site (Cloudflare: **Scrape Shield → Email Address
+  Obfuscation**).
 
 ## Running it (Docker)
 

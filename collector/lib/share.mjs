@@ -90,11 +90,11 @@ export function shareHandler({ dataDir, log = console.log, now = () => new Date(
         mkdirSync(dir, { recursive: true });
         appendFileSync(join(dir, `${chain}.ndjson`), kept.map((p) => JSON.stringify({ ...p, from: phone })).join('\n') + '\n');
       }
-      // One line a day per hundred posts, not one per post.
+      // 0.10.0: a line for every post, with the day's running total (a phone sends a few times a day).
       if (logged.day !== day) logged = { day, posts: 0, kept: 0 };
       logged.posts++;
       logged.kept += kept.length;
-      if (logged.posts === 1 || logged.posts % 100 === 0) log(`share: ${logged.posts} posts from phones today, ${logged.kept} prices kept`);
+      log(`share: ${kept.length} ${chain} prices from a phone (${logged.posts} posts, ${logged.kept} prices today)`);
       json(res, 200, { ok: true, kept: kept.length });
     });
     return true;
