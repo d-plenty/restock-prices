@@ -1,6 +1,7 @@
 # Restock prices collector. In Dockge: + Compose, name it restock-prices, paste this, put
 # GITHUB_TOKEN=…, HELPER_KEY=… and FEEDBACK_PASSWORD=… in the .env box, then Deploy. It waits and runs every Thursday at 1:00 am (Brisbane time), and
-# again on Friday at 1:00 am only for a shop that failed or came back short.
+# again on Friday at 1:00 am only for a shop that failed or came back short. Every night at 3:00 am it adds the prices
+# Restock phones sent back and publishes the day-one files again.
 services:
   restock-prices:
     image: ghcr.io/d-plenty/restock-prices:latest
@@ -19,7 +20,7 @@ services:
       - HELPER_PORT=8790
       - FEEDBACK_PASSWORD=${FEEDBACK_PASSWORD}    # in Dockge's .env box: the password for /feedback/inbox
     ports:
-      - "8790:8790"                          # the price helper phone and Restock feedback (put it behind your reverse proxy)
+      - "8790:8790"                          # the price helper phone, prices Restock phones send back, and feedback (behind your reverse proxy)
     volumes:
       - restock-prices-data:/data
 volumes:

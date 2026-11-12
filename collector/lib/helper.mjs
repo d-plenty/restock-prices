@@ -3,13 +3,15 @@
 // shelf prices only. They wait in /data/inbox/<shop>.ndjson and are folded into that shop's prices at
 // the next run (or `node collect.mjs inbox`), then published with the rest.
 //
-// Helper uploads need HELPER_KEY ("Authorization: Bearer <HELPER_KEY>"). The same port takes feedback.
+// Helper uploads need HELPER_KEY ("Authorization: Bearer <HELPER_KEY>"). The same port takes feedback
+// (lib/feedback.mjs) and, from 0.9.14, the prices every Restock phone sends back (lib/share.mjs).
 import { createServer } from 'node:http';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
 import { join } from 'node:path';
 import { readSize } from './size.mjs';
 import { feedbackHandler } from './feedback.mjs';
+import { shareHandler } from './share.mjs';
 
 export const HELPER_SHOPS = ['coles', 'woolworths'];
 const MAX_BODY = 8 * 1024 * 1024;
@@ -77,7 +79,7 @@ export function waiting(dataDir, shop) {
   return existsSync(file) ? statSync(file).size : 0;
 }
 
-/** Starts the helper's address. Returns the server (or undefined when HELPER_KEY isn't set). */
+/** Starts the collector's address: the helper phone, phones' prices and feedback. Returns the server. */
 export function startHelper({
   dataDir,
   key = process.env.HELPER_KEY,
@@ -88,6 +90,8 @@ export function startHelper({
 }) {
   // 0.9.13: the same address takes feedback from the app (lib/feedback.mjs), with or without a helper phone.
   const feedback = feedbackHandler({ dataDir, password: feedbackPassword, log });
+  // 0.9.14: Send prices back, from every Restock phone that has it on.
+  const share = shareHandler({ dataDir, log, today });
   const want = key ? Buffer.from(`Bearer ${key}`) : undefined;
   const allowed = (req) => {
     if (!want) return false;
@@ -102,6 +106,10 @@ export function startHelper({
     const path = (req.url ?? '').split('?')[0];
     if (path === '/feedback' || path.startsWith('/feedback/')) {
       if (feedback(req, res, path)) return;
+      return reply(res, 404, { error: 'not here' });
+    }
+    if (path.startsWith('/share/')) {
+      if (share(req, res, path)) return;
       return reply(res, 404, { error: 'not here' });
     }
     if (!path.startsWith('/helper/')) return reply(res, 404, { error: 'not here' });
@@ -139,6 +147,6 @@ export function startHelper({
       reply(res, 200, { ok: true, kept: kept.length });
     });
   });
-  server.listen(port, () => log(`port ${port}: ${key ? 'price helper uploads, ' : ''}feedback${feedbackPassword ? ' and its inbox' : ' (set FEEDBACK_PASSWORD to read the inbox)'}`));
+  server.listen(port, () => log(`port ${port}: ${key ? 'price helper uploads, ' : ''}prices from phones, feedback${feedbackPassword ? ' and its inbox' : ' (set FEEDBACK_PASSWORD to read the inbox)'}`));
   return server;
 }

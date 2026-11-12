@@ -1,9 +1,10 @@
 # Restock prices
 
-Weekly Australian supermarket prices for [Restock](https://github.com/d-plenty/Restock): Coles, Woolworths,
-Aldi and Costco. One file per shop with products, sizes, barcodes (where the shop shows them) and price history.
-Restock's **Judge new items from day one** (Settings → Shopping) uses it to know a product's usual price and usual
-sale price straight away. Phones download only the shops they use, for 8 weeks, 6 months or 12 months.
+Australian supermarket prices for [Restock](https://github.com/d-plenty/Restock): Coles, Woolworths, Aldi and
+Costco, collected every Thursday and added to every night from the prices Restock phones send back. One file per
+shop with products, sizes, barcodes (where the shop shows them) and price history. Restock's **Judge new items
+from day one** (Settings → Prices and deals) uses it to know a product's usual price and usual sale price straight
+away. Phones download only the shops they use, for 8 weeks, 6 months or 12 months, weekly or every day.
 
 Not affiliated with any shop. Read [NOTICE-DATA.md](NOTICE-DATA.md) before using the data.
 
@@ -12,11 +13,11 @@ Not affiliated with any shop. Read [NOTICE-DATA.md](NOTICE-DATA.md) before using
 | Path | What's in it |
 |---|---|
 | `window/<shop>-56d.json.gz`, `-182d`, `-365d` | **What phones download** (Restock 0.9.13 and later): every product's price changes over the last 8 weeks, 6 months or 12 months, by the shop's product number. No names or pictures, so they're small. Format `restock-window`: `products: { "<product number>": [[day, cents, flags], …] }`, `day` counted from `from` (day 0 is the price already in force), flags 1 = on special, 2 = member price. |
-| `window/index.json` | Each window file's size and product count, for the app's size guide. |
+| `window/index.json` | Each window file's size and product count, for the app's size guide; `to` (the day it was last published, every night) and `full` (its last Thursday collection), so phones know when there's something new. |
 | `latest/<shop>.json.gz` | Every product seen in the last 90 days, with its prices for the last year and its name, size, barcode and picture. Restock's import format (`restock-export`, the same as the server's Data tab). Restock 0.9.12 and earlier download this. |
 | `latest/<shop>-details.json.gz` | Extra facts per product: category, the shop's unit price text and a link. |
 | `history/<shop>/<year>.json.gz` | Prices older than a year, by product. |
-| `STATUS.md` | The last run: how many products each shop returned, whether it worked, how many prices came from the price helper phone, and the size of each day-one download. |
+| `STATUS.md` | The last run: how many products each shop returned, whether it worked, how many prices came from the price helper phone and from phones, last night's prices from phones (and how many are waiting for a second phone), and the size of each day-one download. |
 
 Shops: `woolworths`, `coles`, `aldi`, `costco`. A price is only written when it changes (price, was-price,
 special, member-only or promo), so the files stay small. Sizes are also given as `qty` + `qty_unit` (`g`, `ml`
@@ -43,6 +44,21 @@ that failed or returned far fewer products than last time.
   the same day, the shop's own reading is kept: it has the "was" price, special and member flags, which
   hotprices.org's files don't.
 
+## Prices from phones (Send prices back)
+
+Restock 0.9.14 and later send the shelf prices their searches and price checks read from Coles, Woolworths, Aldi
+and Costco here, to `https://<this address>/share/prices`, unless the person turned **Send prices back** off
+(Settings → Privacy and sharing). Only what the shop's website said: never a price typed in by hand, and nothing
+about the person, just a random number per install.
+
+There's no key (a free app can't keep one secret), so every price is checked instead:
+- each phone can send 200 times and 20,000 prices a day, and each internet address 600 times (counted in memory; the address is never written down);
+- products are tidied as the helper phone's are: sensible prices, the last fortnight only;
+- **every night at 3:00 am** (`NIGHTLY_TIME`) they're added to the shops' history and the files are published. A phone never replaces the collector's or the helper phone's own reading for a day, and never renames a product the collector knows;
+- a price far from the last known one (under 35% or over 2.5 times it), or a product the collector hasn't seen, waits until a second phone sends the same price, for up to 14 days.
+
+They wait in `/data/phones/<shop>.ndjson` (and `<shop>-held.ndjson`) until then.
+
 ## Feedback from the app
 
 Restock's **Settings → Feedback** (on phones, the web page and the iPhone web app) sends here, to
@@ -67,14 +83,14 @@ FEEDBACK_PASSWORD=
 each followed by its value: `GITHUB_TOKEN` a fine-grained token for this repository only, with **Contents: read
 and write** (without one it still collects, and keeps the files in its volume under `/data/out`); `HELPER_KEY`
 any long password, typed into the price helper phone too; `FEEDBACK_PASSWORD` the password for the feedback inbox.
-Port 8790 takes the price helper's uploads and the app's feedback: put it behind your reverse proxy with HTTPS
+Port 8790 takes the price helper's uploads, the prices phones send back and the app's feedback: put it behind your reverse proxy with HTTPS
 (for example `https://restock-prices.plenty.family`).
 
 ```
 docker exec restock-prices node collect.mjs run              # all shops now
 docker exec restock-prices node collect.mjs run coles        # one shop now
 docker exec restock-prices node collect.mjs probe coles      # one page, saved to /data/probe, to see what a shop sends
-docker exec restock-prices node collect.mjs inbox            # fold in the price helper phone's prices now, and publish
+docker exec restock-prices node collect.mjs inbox            # add the helper phone's and phones' prices now, and publish (it does this every night)
 docker logs restock-prices                                   # what it did
 ```
 
@@ -89,7 +105,8 @@ docker logs restock-prices                                   # what it did
 | `COLES_SOURCE` | `auto` | `auto`: Coles' site, hotprices.org if Coles blocks it. `site` or `hotprices` for one only |
 | `ALDI_WORDS` | a list of about 120 | the words Aldi is searched with |
 | `HELPER_KEY` | (none) | turns on the price helper's uploads; the phone sends it as its key |
-| `HELPER_PORT` | `8790` | the port for the price helper and feedback |
+| `HELPER_PORT` | `8790` | the port for the price helper, prices from phones and feedback |
+| `NIGHTLY_TIME` | `03:00` | when phones' prices go in and the day-one files are published again |
 | `FEEDBACK_PASSWORD` | (none) | the password for `/feedback/inbox` (feedback is still taken without one, just not readable) |
 
 If the container was off at run time (a TrueNAS update or a power cut), it runs as soon as it starts again, any day up to the next run.

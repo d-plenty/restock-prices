@@ -4,7 +4,8 @@
 //   node collect.mjs run [shop…] run now (all shops, or the ones named), then publish
 //   node collect.mjs probe [shop] fetch one page per shop, save what came back to /data/probe, and say
 //                                what it understood. Send those files if a shop stops working.
-//   node collect.mjs inbox       fold in what the price helper phone sent (Coles, Woolworths) now, and publish
+//   node collect.mjs inbox       fold in what the price helper phone and other phones sent now, and publish
+//                                (it also does this every night at NIGHTLY_TIME, 3:00 am unless changed)
 // With HELPER_KEY set, it also takes uploads from a Restock price helper phone (lib/helper.mjs).
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -16,6 +17,7 @@ import * as coles from './shops/coles.mjs';
 import * as aldi from './shops/aldi.mjs';
 import * as costco from './shops/costco.mjs';
 import { HELPER_SHOPS, readInbox, startHelper } from './lib/helper.mjs';
+import { foldPhones, SHARE_SHOPS } from './lib/share.mjs';
 
 export const SHOP_CODE = { woolworths, coles, aldi, costco };
 const DATA = process.env.DATA_DIR || '/data';
@@ -29,6 +31,8 @@ const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 const RUN_DAY = (process.env.RUN_DAY || 'thu').toLowerCase();
 const RETRY_DAY = (process.env.RETRY_DAY || 'fri').toLowerCase();
 const RUN_TIME = process.env.RUN_TIME || '01:00';
+// 0.9.14: every night, what the phones sent goes in and the day-one files are published again.
+const NIGHTLY_TIME = process.env.NIGHTLY_TIME || '03:00';
 const SHORT = Number(process.env.SHORT_FRACTION || 0.7); // fewer than 70% of last good run = retry
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
@@ -63,17 +67,19 @@ export async function runShop(shop, { client, day = today(), root = OUT, stateDi
   let changed = fold(state, [...seen.values()], day);
   const helped = foldInbox(state, shop, dataDirOf(stateDir));
   changed += helped.changed;
-  writeShop(shop, state, day, root, statePath);
+  const phoned = foldPhones(state, shop, dataDirOf(stateDir), day);
+  changed += phoned.changed;
+  writeShop(shop, state, day, root, statePath, { full: status === 'ok' || status === 'short' });
   const short = prev?.good && seen.size < prev.good * SHORT;
   if (status === 'ok' && short) status = 'short';
-  log(`${shop}: ${seen.size} products, ${changed} new prices, ${http.requests} requests, ${status}${helped.count ? ` (and ${helped.count} prices from the price helper phone)` : ''}`);
-  return { status, count: seen.size, changed, why, helper: helped.count, good: status === 'ok' ? seen.size : prev?.good };
+  log(`${shop}: ${seen.size} products, ${changed} new prices, ${http.requests} requests, ${status}${helped.count ? `, ${helped.count} prices from the price helper phone` : ''}${phoned.count ? `, ${phoned.count} from ${phoned.phones} phones` : ''}`);
+  return { status, count: seen.size, changed, why, helper: helped.count, phones: phoned.count, held: phoned.held, good: status === 'ok' ? seen.size : prev?.good };
 }
 
 const dataDirOf = (stateDir) => join(stateDir, '..');
 
 /** The state, its year files and latest/ files, written out. */
-function writeShop(shop, state, day, root, statePath) {
+function writeShop(shop, state, day, root, statePath, { full = false } = {}) {
   const old = split(state, day);
   writeGz(statePath, state);
   writeHistory(root, shop, old);
@@ -90,7 +96,14 @@ function writeShop(shop, state, day, root, statePath) {
   }
   index.format = 'restock-window-index';
   index.v = 1;
-  index.shops = { ...(index.shops ?? {}), [shop]: { to: day, products: Object.values(state.products ?? {}).filter((p) => !p.stale).length, bytes: sizes } };
+  // `full`: the day of the shop's last full collection (Thursday's run), so a phone set to weekly
+  // downloads once that's in; `to` moves on every night as phones' prices come in (0.9.14).
+  const was = index.shops?.[shop];
+  index.updated = new Date().toISOString();
+  index.shops = {
+    ...(index.shops ?? {}),
+    [shop]: { to: day, full: full ? day : (was?.full ?? day), products: Object.values(state.products ?? {}).filter((p) => !p.stale).length, bytes: sizes },
+  };
   writeFileSync(indexPath, JSON.stringify(index, null, 1) + '\n');
 }
 
@@ -115,17 +128,17 @@ export function foldInbox(state, shop, dataDir = DATA) {
 /** `inbox`: fold in the price helper's prices now, without asking the shops, and publish. */
 async function inboxNow() {
   const r = runs();
-  for (const shop of HELPER_SHOPS.filter((s) => SHOPS.includes(s))) {
+  for (const shop of SHOPS) {
     const statePath = join(STATE, `${shop}.json.gz`);
     const state = readGz(statePath, { products: {} });
-    const { count, changed } = foldInbox(state, shop);
-    if (!count) {
-      log(`${shop}: nothing from the price helper phone yet`);
-      continue;
-    }
+    const helped = HELPER_SHOPS.includes(shop) ? foldInbox(state, shop) : { count: 0, changed: 0 };
+    const phoned = SHARE_SHOPS.includes(shop) ? foldPhones(state, shop, DATA, today()) : { count: 0, changed: 0, held: 0, phones: 0 };
+    if (!Object.keys(state.products).length) continue; // never collected: nothing to publish
     writeShop(shop, state, today(), OUT, statePath);
-    log(`${shop}: ${count} prices from the price helper phone, ${changed} new`);
+    r[shop] = { ...(r[shop] ?? {}), nightly: { at: new Date().toISOString(), helper: helped.count, phones: phoned.count, fromPhones: phoned.phones, held: phoned.held, changed: helped.changed + phoned.changed } };
+    log(`${shop}: ${helped.count} prices from the price helper phone, ${phoned.count} from ${phoned.phones} phones (${phoned.held} waiting for a second phone), ${helped.changed + phoned.changed} new`);
   }
+  saveRuns(r);
   try {
     publish(r);
   } catch (e) {
@@ -134,10 +147,19 @@ async function inboxNow() {
 }
 
 function summary(r) {
-  const lines = ['# Last run', '', '| Shop | When | Products | New prices | From the price helper phone | Result |', '|---|---|---|---|---|---|'];
+  const lines = ['# Last run', '', '| Shop | When | Products | New prices | From the price helper phone | From phones | Result |', '|---|---|---|---|---|---|---|'];
   for (const s of Object.keys(SHOP_CODE)) {
     const x = r[s];
-    if (x) lines.push(`| ${s} | ${x.at} | ${x.count} | ${x.changed} | ${HELPER_SHOPS.includes(s) ? (x.helper ?? 0) : '–'} | ${x.status}${x.why ? `: ${x.why.replace(/\|/g, '/')}` : ''} |`);
+    if (x?.at) lines.push(`| ${s} | ${x.at} | ${x.count} | ${x.changed} | ${HELPER_SHOPS.includes(s) ? (x.helper ?? 0) : '–'} | ${x.phones ?? 0} | ${x.status}${x.why ? `: ${x.why.replace(/\|/g, '/')}` : ''} |`);
+  }
+  // 0.9.14: last night's fold of what the phones sent.
+  const nights = Object.keys(SHOP_CODE).filter((s) => r[s]?.nightly);
+  if (nights.length) {
+    lines.push('', '# Last night', '', '| Shop | When | From the price helper phone | From phones | Phones | Waiting for a second phone | New prices |', '|---|---|---|---|---|---|---|');
+    for (const s of nights) {
+      const n = r[s].nightly;
+      lines.push(`| ${s} | ${n.at} | ${HELPER_SHOPS.includes(s) ? n.helper : '–'} | ${n.phones} | ${n.fromPhones} | ${n.held} | ${n.changed} |`);
+    }
   }
   // Restock 0.9.13: the day-one download sizes, as the app shows them.
   try {
@@ -178,9 +200,11 @@ function publish(r) {
     quiet(() => git('remote', 'set-url', 'origin', url));
     quiet(() => git('pull', '--rebase', '--depth', '1', 'origin', 'HEAD'));
   }
-  for (const sub of ['latest', 'history']) if (existsSync(join(OUT, sub))) cpSync(join(OUT, sub), join(dir, sub), { recursive: true });
+  // 0.9.14: window/ too (the day-one files phones download). 0.9.13 wrote them but didn't publish them.
+  const subs = ['latest', 'history', 'window'].filter((sub) => existsSync(join(OUT, sub)));
+  for (const sub of subs) cpSync(join(OUT, sub), join(dir, sub), { recursive: true });
   cpSync(join(OUT, 'STATUS.md'), join(dir, 'STATUS.md'));
-  git('add', '-A', 'latest', 'history', 'STATUS.md');
+  git('add', '-A', ...subs, 'STATUS.md');
   if (!git('status', '--porcelain').trim()) {
     log('publish: nothing changed');
     return;
@@ -252,7 +276,8 @@ export function missedRun(r, now = new Date()) {
 
 async function schedule() {
   startHelper({ dataDir: DATA, today, log });
-  log(`waiting: ${SHOPS.join(', ')} every ${RUN_DAY} at ${RUN_TIME}, retry ${RETRY_DAY} for any shop that failed or came back short`);
+  log(`waiting: ${SHOPS.join(', ')} every ${RUN_DAY} at ${RUN_TIME}, retry ${RETRY_DAY} for any shop that failed or came back short; phones' prices go in every night at ${NIGHTLY_TIME}`);
+  let night = '';
   // 0.9.12: the container was off or restarting at run time (a TrueNAS update, a power cut): run now.
   let done = '';
   if (missedRun(runs())) {
@@ -266,6 +291,10 @@ async function schedule() {
     const hm = now.toTimeString().slice(0, 5);
     const day = DAYS[now.getDay()];
     const key = `${today()} ${day}`;
+    if (hm === NIGHTLY_TIME && night !== key) {
+      night = key;
+      await inboxNow();
+    }
     if (hm === RUN_TIME && done !== key) {
       done = key;
       if (day === RUN_DAY) await runNow(SHOPS);

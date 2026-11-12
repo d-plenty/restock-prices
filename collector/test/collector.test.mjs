@@ -135,6 +135,12 @@ test('a run writes latest/ and the state, even when the shop stops part way', as
     assert.equal(r.count, 1);
     const latest = readGz(join(dir, 'out', 'latest', 'woolworths.json.gz'));
     assert.equal(latest.tables.products[0].prices[0].price, 3.1);
+    // 0.9.14: the window index says when the shop was last fully collected (a blocked run isn't).
+    const { readFileSync } = await import('node:fs');
+    const index = JSON.parse(readFileSync(join(dir, 'out', 'window', 'index.json'), 'utf8'));
+    assert.equal(index.shops.woolworths.to, '2026-11-12');
+    assert.equal(index.shops.woolworths.full, '2026-11-12'); // first time: the day it was written
+    assert.ok(index.updated);
   } finally {
     shops.woolworths = { ...woolworths, collect: orig };
     rmSync(dir, { recursive: true, force: true });
@@ -282,4 +288,50 @@ test("hotprices.org's past prices never replace the shop's own reading for that 
   const hp = { id: 'coles:1', chain: 'coles', store_product_id: '1', name: 'Milk', price: { price: 3.4 }, history: [{ date: '2026-11-10', price: 2.5 }, { date: '2026-11-01', price: 3.4 }] };
   fold(state, [hp], '2026-11-12');
   assert.deepEqual(state.products['coles:1'].prices.map((x) => [x.date, x.price, !!x.is_special]), [['2026-11-01', 3.4, false], ['2026-11-10', 2.5, true], ['2026-11-12', 3.4, false]]);
+});
+
+test('0.9.14 prices from phones: no key, checked, the collector wins, odd ones wait for a second phone', async () => {
+  const { startHelper } = await import('../lib/helper.mjs');
+  const { foldPhones } = await import('../lib/share.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'rps-'));
+  const server = startHelper({ dataDir: dir, key: 'sekrit', port: 0, today: () => '2026-11-12', log: () => {} });
+  await new Promise((r) => server.once('listening', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const send = (install, chain, products) =>
+    fetch(`${base}/share/prices`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ format: 'restock-share', v: 1, install, chain, products }) });
+  const p = (id, price, day = '2026-11-11', extra = {}) => ({ store_product_id: id, name: `Thing ${id}`, price: { price }, day, ...extra });
+  try {
+    assert.equal((await send('phone-aaaa', 'bws', [p('1', 3)])).status, 400); // not a shop that's collected
+    assert.equal((await send('x', 'coles', [p('1', 3)])).status, 400); // no install number
+    const ok = await send('phone-aaaa', 'aldi', [p('100', 3.49), p('200', 9), p('300', 2.5), p('400', 4), p('400', 1, '2026-11-11'), { name: 'no id' }]);
+    assert.deepEqual(await ok.json(), { ok: true, kept: 5 });
+    assert.equal((await send('phone-bbbb', 'aldi', [p('400', 4)])).status, 200);
+    // What the collector already knows: 100 at $3.49 (the phone agrees), 200 at $3 (the phone says $9:
+    // odd), and its own reading of 300 on the 11th, with its own name.
+    const state = {
+      products: {
+        'aldi:100': { store_product_id: '100', name: 'Aldi Milk', prices: [{ date: '2026-11-01', price: 3.49 }] },
+        'aldi:200': { store_product_id: '200', name: 'Aldi Bread', prices: [{ date: '2026-11-01', price: 3 }] },
+        'aldi:300': { store_product_id: '300', name: 'Aldi Eggs', prices: [{ date: '2026-11-11', price: 2.9 }] },
+      },
+    };
+    const r = foldPhones(state, 'aldi', dir, '2026-11-12');
+    // 100: nothing new (same price). 200: held. 300: the collector's reading stays. 400 ($4): new, two phones agree. 400 ($1): one phone, held.
+    assert.deepEqual(state.products['aldi:200'].prices, [{ date: '2026-11-01', price: 3 }]);
+    assert.deepEqual(state.products['aldi:300'].prices, [{ date: '2026-11-11', price: 2.9 }]);
+    assert.equal(state.products['aldi:300'].name, 'Aldi Eggs');
+    assert.deepEqual(state.products['aldi:400'].prices, [{ date: '2026-11-11', price: 4 }]);
+    assert.equal(r.held, 2);
+    assert.equal(r.phones, 2);
+    // A second phone agrees about 200 at $9 (bread went up?): in it goes at the next fold.
+    assert.equal((await send('phone-cccc', 'aldi', [p('200', 9)])).status, 200);
+    const r2 = foldPhones(state, 'aldi', dir, '2026-11-12');
+    assert.deepEqual(state.products['aldi:200'].prices.at(-1), { date: '2026-11-11', price: 9 });
+    assert.equal(r2.held, 1); // 400 at $1 still waits
+    // Held ones are let go after 14 days.
+    assert.equal(foldPhones(state, 'aldi', dir, '2026-11-30').held, 0);
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
