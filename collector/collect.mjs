@@ -67,7 +67,7 @@ export async function runShop(shop, { client, day = today(), root = OUT, stateDi
   const short = prev?.good && seen.size < prev.good * SHORT;
   if (status === 'ok' && short) status = 'short';
   log(`${shop}: ${seen.size} products, ${changed} new prices, ${http.requests} requests, ${status}${helped.count ? ` (and ${helped.count} prices from the price helper phone)` : ''}`);
-  return { status, count: seen.size, changed, why, good: status === 'ok' ? seen.size : prev?.good };
+  return { status, count: seen.size, changed, why, helper: helped.count, good: status === 'ok' ? seen.size : prev?.good };
 }
 
 const dataDirOf = (stateDir) => join(stateDir, '..');
@@ -86,7 +86,13 @@ export function foldInbox(state, shop, dataDir = DATA) {
   if (!HELPER_SHOPS.includes(shop)) return { count: 0, changed: 0 };
   const { products, done } = readInbox(dataDir, shop);
   const byDay = new Map();
-  for (const p of products) if (p?.day) byDay.set(p.day, [...(byDay.get(p.day) ?? []), p]);
+  for (const p of products) {
+    if (!p?.day) continue;
+    // A week from the helper phone is tens of thousands of prices: added to, not copied each time.
+    const list = byDay.get(p.day);
+    if (list) list.push(p);
+    else byDay.set(p.day, [p]);
+  }
   let changed = 0;
   for (const d of [...byDay.keys()].sort()) changed += fold(state, byDay.get(d), d);
   done();
@@ -115,10 +121,10 @@ async function inboxNow() {
 }
 
 function summary(r) {
-  const lines = ['# Last run', '', '| Shop | When | Products | New prices | Result |', '|---|---|---|---|---|'];
+  const lines = ['# Last run', '', '| Shop | When | Products | New prices | From the price helper phone | Result |', '|---|---|---|---|---|---|'];
   for (const s of Object.keys(SHOP_CODE)) {
     const x = r[s];
-    if (x) lines.push(`| ${s} | ${x.at} | ${x.count} | ${x.changed} | ${x.status}${x.why ? `: ${x.why.replace(/\|/g, '/')}` : ''} |`);
+    if (x) lines.push(`| ${s} | ${x.at} | ${x.count} | ${x.changed} | ${HELPER_SHOPS.includes(s) ? (x.helper ?? 0) : '–'} | ${x.status}${x.why ? `: ${x.why.replace(/\|/g, '/')}` : ''} |`);
   }
   return `${lines.join('\n')}\n`;
 }
@@ -201,10 +207,38 @@ async function probe(shops) {
 }
 
 /** Wait for RUN_DAY / RETRY_DAY at RUN_TIME (container time zone), once each per day. */
+/**
+ * When this week's run should have started: the last RUN_DAY at RUN_TIME up to now (local time).
+ * Exported for the tests.
+ */
+export function lastRunDue(now = new Date()) {
+  const [h, m] = RUN_TIME.split(':').map(Number);
+  const due = new Date(now);
+  due.setHours(h, m, 0, 0);
+  const back = (now.getDay() - DAYS.indexOf(RUN_DAY) + 7) % 7;
+  due.setDate(due.getDate() - back);
+  if (due > now) due.setDate(due.getDate() - 7);
+  return due;
+}
+
+/** True when the container was off (or restarting) at this week's run time, so it never ran. */
+export function missedRun(r, now = new Date()) {
+  const ats = SHOPS.map((s) => Date.parse(r[s]?.at ?? '')).filter((t) => Number.isFinite(t));
+  if (!ats.length) return false; // never run: wait for the day, or `run`
+  return Math.max(...ats) < lastRunDue(now).getTime() && now.getTime() - lastRunDue(now).getTime() < 6 * 86_400_000;
+}
+
 async function schedule() {
   startHelper({ dataDir: DATA, today, log });
   log(`waiting: ${SHOPS.join(', ')} every ${RUN_DAY} at ${RUN_TIME}, retry ${RETRY_DAY} for any shop that failed or came back short`);
+  // 0.9.12: the container was off or restarting at run time (a TrueNAS update, a power cut): run now.
   let done = '';
+  if (missedRun(runs())) {
+    log(`missed this week's ${RUN_DAY} ${RUN_TIME} run (the container wasn't running then), so running now`);
+    await runNow(SHOPS);
+    // This week's run is done: not again if the catch-up started on the run day itself.
+    done = `${today()} ${DAYS[new Date().getDay()]}`;
+  }
   for (;;) {
     const now = new Date();
     const hm = now.toTimeString().slice(0, 5);

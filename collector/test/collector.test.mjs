@@ -211,3 +211,19 @@ test('price helper: only the right key, only tidy products, folded in at the nex
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a run missed while the container was off happens when it starts again', async () => {
+  const { lastRunDue, missedRun } = await import('../collect.mjs');
+  const fri = new Date(2026, 10, 13, 9, 0); // Friday 13 Nov 2026, 9 am
+  const due = lastRunDue(fri);
+  assert.equal(due.getDay(), 4); // Thursday
+  assert.equal(due.getHours(), 1);
+  assert.equal(due.getDate(), 12);
+  const before = { woolworths: { at: new Date(2026, 10, 5, 2).toISOString() } };
+  assert.equal(missedRun(before, fri), true);
+  const after = { woolworths: { at: new Date(2026, 10, 12, 3).toISOString() } };
+  assert.equal(missedRun(after, fri), false);
+  assert.equal(missedRun({}, fri), false);
+  const wedNight = new Date(2026, 10, 11, 23, 0); // before this week's run: last week's counts
+  assert.equal(lastRunDue(wedNight).getDate(), 5);
+});

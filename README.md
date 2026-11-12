@@ -64,6 +64,8 @@ docker logs restock-prices                                   # what it did
 | `HELPER_KEY` | (none) | turns on the price helper's address; the phone sends it as its key |
 | `HELPER_PORT` | `8790` | the price helper's port |
 
+If the container was off at run time (a TrueNAS update or a power cut), it runs as soon as it starts again, any day up to the next run.
+
 ## Licence
 
 The collector's code is GPL-3.0 (see `LICENSE`). The data has no licence from this project: see
