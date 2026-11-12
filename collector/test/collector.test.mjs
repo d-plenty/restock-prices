@@ -227,3 +227,59 @@ test('a run missed while the container was off happens when it starts again', as
   const wedNight = new Date(2026, 10, 11, 23, 0); // before this week's run: last week's counts
   assert.equal(lastRunDue(wedNight).getDate(), 5);
 });
+
+test('day-one window files: just ids and prices, starting with the price in force', async () => {
+  const { windowFile } = await import('../lib/store.mjs');
+  const state = { products: {
+    'coles:1': { store_product_id: '1', name: 'Milk', prices: [{ date: '2026-01-01', price: 3.4 }, { date: '2026-10-20', price: 2.9, is_special: true }, { date: '2026-11-03', price: 3.4 }] },
+    'coles:2': { store_product_id: '2', name: 'Gone', stale: true, prices: [{ date: '2026-11-01', price: 1 }] },
+  } };
+  const w = windowFile('coles', state, '2026-11-12', 56);
+  assert.equal(w.format, 'restock-window');
+  assert.equal(w.from, '2026-09-17');
+  assert.deepEqual(w.products['1'], [[0, 340], [33, 290, 1], [47, 340]]);
+  assert.equal(w.products['2'], undefined);
+  assert.equal(Object.keys(w.products).length, 1);
+});
+
+test('feedback: kept with its screenshots, read behind the password, marked done', async () => {
+  const { startHelper } = await import('../lib/helper.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'rpf-'));
+  const server = startHelper({ dataDir: dir, key: undefined, port: 0, today: () => '2026-11-12', log: () => {}, feedbackPassword: 'pw' });
+  await new Promise((r) => server.once('listening', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]).toString('base64');
+    const send = (b) => fetch(`${base}/feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+    const ok = await send({ format: 'restock-feedback', install: 'phone-1', kind: 'wrong', message: 'Pick my <b>milk</b> does nothing', app: '0.9.13', platform: 'android', diagnostics: { v: 1 }, screenshots: [{ type: 'image/jpeg', data: jpeg }, { type: 'image/png', data: jpeg }] });
+    assert.equal(ok.status, 200);
+    assert.equal((await send({ format: 'restock-feedback', message: '' })).status, 400);
+    for (let i = 0; i < 4; i++) await send({ format: 'restock-feedback', install: 'phone-1', message: `more ${i}` });
+    assert.equal((await send({ format: 'restock-feedback', install: 'phone-1', message: 'six' })).status, 429);
+    assert.equal((await fetch(`${base}/feedback/inbox`)).status, 401);
+    const auth = { Authorization: `Basic ${Buffer.from('me:pw').toString('base64')}` };
+    const list = await (await fetch(`${base}/feedback/inbox`, { headers: auth })).text();
+    assert.match(list, /5 messages, 5 not done yet/);
+    assert.match(list, /Pick my &lt;b&gt;milk&lt;\/b&gt;/); // never as HTML
+    const { id } = await ok.json();
+    const one = await (await fetch(`${base}/feedback/inbox/${id}`, { headers: auth })).text();
+    assert.match(one, /shot-1\.jpg/);
+    assert.doesNotMatch(one, /shot-2/); // the "png" wasn't a picture
+    assert.equal((await fetch(`${base}/feedback/inbox/${id}/shot-1.jpg`, { headers: auth })).headers.get('content-type'), 'image/jpeg');
+    await fetch(`${base}/feedback/inbox/${id}/done`, { method: 'POST', headers: auth, redirect: 'manual' });
+    assert.match(await (await fetch(`${base}/feedback/inbox`, { headers: auth })).text(), /4 not done yet/);
+    assert.equal((await fetch(`${base}/helper/status`)).status, 401); // no helper key: helper uploads stay shut
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("hotprices.org's past prices never replace the shop's own reading for that day", async () => {
+  const state = { products: {} };
+  const own = { id: 'coles:1', chain: 'coles', store_product_id: '1', name: 'Milk', price: { price: 2.5, is_special: true, was_price: 3.4 } };
+  fold(state, [own], '2026-11-10');
+  const hp = { id: 'coles:1', chain: 'coles', store_product_id: '1', name: 'Milk', price: { price: 3.4 }, history: [{ date: '2026-11-10', price: 2.5 }, { date: '2026-11-01', price: 3.4 }] };
+  fold(state, [hp], '2026-11-12');
+  assert.deepEqual(state.products['coles:1'].prices.map((x) => [x.date, x.price, !!x.is_special]), [['2026-11-01', 3.4, false], ['2026-11-10', 2.5, true], ['2026-11-12', 3.4, false]]);
+});

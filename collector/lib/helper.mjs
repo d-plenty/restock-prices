@@ -3,12 +3,13 @@
 // shelf prices only. They wait in /data/inbox/<shop>.ndjson and are folded into that shop's prices at
 // the next run (or `node collect.mjs inbox`), then published with the rest.
 //
-// Only on when HELPER_KEY is set. Every request needs "Authorization: Bearer <HELPER_KEY>".
+// Helper uploads need HELPER_KEY ("Authorization: Bearer <HELPER_KEY>"). The same port takes feedback.
 import { createServer } from 'node:http';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
 import { join } from 'node:path';
 import { readSize } from './size.mjs';
+import { feedbackHandler } from './feedback.mjs';
 
 export const HELPER_SHOPS = ['coles', 'woolworths'];
 const MAX_BODY = 8 * 1024 * 1024;
@@ -77,10 +78,19 @@ export function waiting(dataDir, shop) {
 }
 
 /** Starts the helper's address. Returns the server (or undefined when HELPER_KEY isn't set). */
-export function startHelper({ dataDir, key = process.env.HELPER_KEY, port = Number(process.env.HELPER_PORT || 8790), today, log = console.log }) {
-  if (!key) return undefined;
-  const want = Buffer.from(`Bearer ${key}`);
+export function startHelper({
+  dataDir,
+  key = process.env.HELPER_KEY,
+  port = Number(process.env.HELPER_PORT || 8790),
+  today,
+  log = console.log,
+  feedbackPassword = process.env.FEEDBACK_PASSWORD,
+}) {
+  // 0.9.13: the same address takes feedback from the app (lib/feedback.mjs), with or without a helper phone.
+  const feedback = feedbackHandler({ dataDir, password: feedbackPassword, log });
+  const want = key ? Buffer.from(`Bearer ${key}`) : undefined;
   const allowed = (req) => {
+    if (!want) return false;
     const got = Buffer.from(String(req.headers.authorization ?? ''));
     return got.length === want.length && timingSafeEqual(got, want);
   };
@@ -90,6 +100,10 @@ export function startHelper({ dataDir, key = process.env.HELPER_KEY, port = Numb
   };
   const server = createServer((req, res) => {
     const path = (req.url ?? '').split('?')[0];
+    if (path === '/feedback' || path.startsWith('/feedback/')) {
+      if (feedback(req, res, path)) return;
+      return reply(res, 404, { error: 'not here' });
+    }
     if (!path.startsWith('/helper/')) return reply(res, 404, { error: 'not here' });
     if (!allowed(req)) return reply(res, 401, { error: 'wrong key' });
     if (req.method === 'GET' && path === '/helper/status')
@@ -125,6 +139,6 @@ export function startHelper({ dataDir, key = process.env.HELPER_KEY, port = Numb
       reply(res, 200, { ok: true, kept: kept.length });
     });
   });
-  server.listen(port, () => log(`helper: taking price helper uploads on port ${port}`));
+  server.listen(port, () => log(`port ${port}: ${key ? 'price helper uploads, ' : ''}feedback${feedbackPassword ? ' and its inbox' : ' (set FEEDBACK_PASSWORD to read the inbox)'}`));
   return server;
 }

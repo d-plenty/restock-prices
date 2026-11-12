@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Client, ShopBlocked } from './lib/http.mjs';
-import { detailsFile, fold, latestFile, readGz, split, writeGz, writeHistory } from './lib/store.mjs';
+import { detailsFile, fold, latestFile, readGz, split, writeGz, writeHistory, writeWindows } from './lib/store.mjs';
 import * as woolworths from './shops/woolworths.mjs';
 import * as coles from './shops/coles.mjs';
 import * as aldi from './shops/aldi.mjs';
@@ -79,6 +79,19 @@ function writeShop(shop, state, day, root, statePath) {
   writeHistory(root, shop, old);
   writeGz(join(root, 'latest', `${shop}.json.gz`), latestFile(shop, state));
   writeGz(join(root, 'latest', `${shop}-details.json.gz`), detailsFile(shop, state));
+  // Restock 0.9.13: the small day-one files, and their sizes for the app's size guide.
+  const sizes = writeWindows(root, shop, state, day);
+  const indexPath = join(root, 'window', 'index.json');
+  let index = {};
+  try {
+    index = JSON.parse(readFileSync(indexPath, 'utf8'));
+  } catch {
+    // first time
+  }
+  index.format = 'restock-window-index';
+  index.v = 1;
+  index.shops = { ...(index.shops ?? {}), [shop]: { to: day, products: Object.values(state.products ?? {}).filter((p) => !p.stale).length, bytes: sizes } };
+  writeFileSync(indexPath, JSON.stringify(index, null, 1) + '\n');
 }
 
 /** What the price helper phone sent for this shop, folded in on the days it saw them. */
@@ -125,6 +138,15 @@ function summary(r) {
   for (const s of Object.keys(SHOP_CODE)) {
     const x = r[s];
     if (x) lines.push(`| ${s} | ${x.at} | ${x.count} | ${x.changed} | ${HELPER_SHOPS.includes(s) ? (x.helper ?? 0) : '–'} | ${x.status}${x.why ? `: ${x.why.replace(/\|/g, '/')}` : ''} |`);
+  }
+  // Restock 0.9.13: the day-one download sizes, as the app shows them.
+  try {
+    const index = JSON.parse(readFileSync(join(OUT, 'window', 'index.json'), 'utf8'));
+    const kb = (b) => (b >= 1_000_000 ? `${(b / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1000))} KB`);
+    lines.push('', '# Day-one downloads (what a phone downloads for each shop)', '', '| Shop | Products | 8 weeks | 6 months | 12 months |', '|---|---|---|---|---|');
+    for (const [shop, x] of Object.entries(index.shops ?? {})) lines.push(`| ${shop} | ${x.products} | ${kb(x.bytes[56])} | ${kb(x.bytes[182])} | ${kb(x.bytes[365])} |`);
+  } catch {
+    // no window files yet
   }
   return `${lines.join('\n')}\n`;
 }
