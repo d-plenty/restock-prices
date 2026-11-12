@@ -58,6 +58,8 @@ There's no key (a free app can't keep one secret), so every price is checked ins
 - **every night at 3:00 am** (`NIGHTLY_TIME`) they're added to the shops' history and the files are published. A phone never replaces the collector's or the helper phone's own reading for a day, and never renames a product the collector knows;
 - a price far from the last known one (under 35% or over 2.5 times it), or a product the collector hasn't seen, waits until a second phone sends the same price, for up to 14 days.
 
+Every limit counts the real internet address (Cloudflare's `CF-Connecting-IP`, or the last address your reverse proxy added), never one the sender wrote, and there are daily caps per address (60,000 prices) and in all (500,000), so the disk can't be filled.
+
 They wait in `/data/phones/<shop>.ndjson` (and `<shop>-held.ndjson`) until then. Every post is logged
 (`docker logs restock-prices`), for example `share: 34 coles prices from a phone (12 posts, 410 prices today)`,
 and STATUS.md's **From phones** column shows what the last nightly run added.
@@ -72,6 +74,7 @@ turned them off) and an email only if they want a reply. A phone can send 5 a da
 - **Read them at `https://<this address>/feedback/inbox`**. The browser asks for a password: any user name, and
   `FEEDBACK_PASSWORD` from the container's settings. Open one to see its screenshots and diagnostics, and mark it done.
 - Nothing is sent anywhere else.
+- **Limits (0.10.1):** at most 300 messages a day in all; wrong inbox passwords are limited to 20 an hour from one address and 200 in all. *Mark as done* only works from the inbox's own button, and the inbox can't be shown inside another website.
 - Email addresses in the inbox are marked so Cloudflare's *Email Address Obfuscation* leaves them alone. If you
   still see `[email protected]`, turn that off for this site (Cloudflare: **Scrape Shield → Email Address
   Obfuscation**).
@@ -89,6 +92,8 @@ FEEDBACK_PASSWORD=
 each followed by its value: `GITHUB_TOKEN` a fine-grained token for this repository only, with **Contents: read
 and write** (without one it still collects, and keeps the files in its volume under `/data/out`); `HELPER_KEY`
 any long password, typed into the price helper phone too; `FEEDBACK_PASSWORD` the password for the feedback inbox.
+The token is only ever used for each pull and push; it isn't saved in the repo copy in the volume (0.10.1 takes out a copy an
+older version saved there).
 Port 8790 takes the price helper's uploads, the prices phones send back and the app's feedback: put it behind your reverse proxy with HTTPS
 (for example `https://restock-prices.plenty.family`).
 

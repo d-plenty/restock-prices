@@ -335,3 +335,42 @@ test('0.9.14 prices from phones: no key, checked, the collector wins, odd ones w
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('0.10.1: limits count the real address, wrong passwords are limited, done only from the inbox', async () => {
+  const { startHelper } = await import('../lib/helper.mjs');
+  const { clientAddress } = await import('../lib/net.mjs');
+  // The first X-Forwarded-For entry is whatever the sender wrote; Cloudflare's own header wins.
+  assert.equal(clientAddress({ headers: { 'x-forwarded-for': 'made-up, 203.0.113.9' }, socket: {} }), '203.0.113.9');
+  assert.equal(clientAddress({ headers: { 'cf-connecting-ip': '198.51.100.4', 'x-forwarded-for': 'made-up' }, socket: {} }), '198.51.100.4');
+  const dir = mkdtempSync(join(tmpdir(), 'rp-net-'));
+  const server = startHelper({ dataDir: dir, key: undefined, port: 0, today: () => '2026-11-12', log: () => {}, feedbackPassword: 'pw' });
+  await new Promise((r) => server.once('listening', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    // A made-up address each time doesn't get round the limit of 30 a day from one address.
+    let last;
+    for (let i = 0; i < 31; i++) {
+      last = await fetch(`${base}/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': `10.0.0.${i}, 203.0.113.9` },
+        body: JSON.stringify({ format: 'restock-feedback', install: `phone-${i}`, kind: 'idea', message: `hello ${i}` }),
+      });
+    }
+    assert.equal(last.status, 429);
+    // Wrong passwords: 20 an hour from one address, then it stops asking.
+    const bad = { Authorization: `Basic ${Buffer.from('x:nope').toString('base64')}`, 'CF-Connecting-IP': '198.51.100.7' };
+    for (let i = 0; i < 20; i++) assert.equal((await fetch(`${base}/feedback/inbox`, { headers: bad })).status, 401);
+    assert.equal((await fetch(`${base}/feedback/inbox`, { headers: bad })).status, 429);
+    // The right password from somewhere else still works.
+    const good = { Authorization: `Basic ${Buffer.from('x:pw').toString('base64')}` };
+    const list = await (await fetch(`${base}/feedback/inbox`, { headers: good })).text();
+    const id = /href="\/feedback\/inbox\/([\w-]+)"/.exec(list)[1];
+    // Mark as done from another website: refused. From the inbox: fine.
+    assert.equal((await fetch(`${base}/feedback/inbox/${id}/done`, { method: 'POST', headers: { ...good, 'Sec-Fetch-Site': 'cross-site' }, redirect: 'manual' })).status, 403);
+    assert.equal((await fetch(`${base}/feedback/inbox/${id}/done`, { method: 'POST', headers: { ...good, 'Sec-Fetch-Site': 'same-origin' }, redirect: 'manual' })).status, 303);
+    const page = await fetch(`${base}/feedback/inbox`, { headers: good });
+    assert.match(page.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+  } finally {
+    server.close();
+  }
+});

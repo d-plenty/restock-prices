@@ -18,6 +18,7 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { cleanProduct } from './helper.mjs';
 import { put } from './store.mjs';
+import { clientAddress } from './net.mjs';
 
 export const SHARE_SHOPS = ['coles', 'woolworths', 'aldi', 'costco'];
 const MAX_BODY = 4 * 1024 * 1024;
@@ -25,6 +26,9 @@ const MAX_PER_POST = 2000;
 const POSTS_PER_PHONE_A_DAY = 200;
 const PRODUCTS_PER_PHONE_A_DAY = 20_000;
 const POSTS_PER_ADDRESS_A_DAY = 600;
+/** 0.10.1: products a day from one address, and from everyone, so the disk can't be filled. */
+const PRODUCTS_PER_ADDRESS_A_DAY = 60_000;
+const PRODUCTS_A_DAY = 500_000;
 const HOLD_DAYS = 14;
 /** A phone's price outside this many times the last known price waits for a second phone. */
 const LOW = 0.35;
@@ -53,7 +57,7 @@ export function shareHandler({ dataDir, log = console.log, now = () => new Date(
       json(res, 405, { error: 'POST only' });
       return true;
     }
-    const who = String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? '').split(',')[0].trim();
+    const who = clientAddress(req);
     let size = 0;
     const parts = [];
     req.on('data', (c) => {
@@ -79,12 +83,20 @@ export function shareHandler({ dataDir, log = console.log, now = () => new Date(
       const phone = hash(install);
       if ((counts.get(`${day} p:${phone}`) ?? 0) >= POSTS_PER_PHONE_A_DAY || (counts.get(`${day} a:${who}`) ?? 0) >= POSTS_PER_ADDRESS_A_DAY)
         return json(res, 429, { error: 'That’s a lot for one day. It will send again tomorrow.' });
-      if ((counts.get(`${day} n:${phone}`) ?? 0) + body.products.length > PRODUCTS_PER_PHONE_A_DAY) return json(res, 429, { error: 'That’s a lot for one day. It will send again tomorrow.' });
+      const more = body.products.length;
+      if (
+        (counts.get(`${day} n:${phone}`) ?? 0) + more > PRODUCTS_PER_PHONE_A_DAY ||
+        (counts.get(`${day} na:${who}`) ?? 0) + more > PRODUCTS_PER_ADDRESS_A_DAY ||
+        (counts.get(`${day} all`) ?? 0) + more > PRODUCTS_A_DAY
+      )
+        return json(res, 429, { error: 'That’s a lot for one day. It will send again tomorrow.' });
       const t = today();
       const kept = body.products.map((p) => cleanProduct(chain, p, t)).filter(Boolean);
       bump(`${day} p:${phone}`);
       bump(`${day} a:${who}`);
       bump(`${day} n:${phone}`, kept.length);
+      bump(`${day} na:${who}`, kept.length);
+      bump(`${day} all`, kept.length);
       if (counts.size > 20_000) for (const k of counts.keys()) if (!k.startsWith(day)) counts.delete(k);
       if (kept.length) {
         mkdirSync(dir, { recursive: true });

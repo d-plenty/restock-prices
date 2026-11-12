@@ -6,12 +6,18 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { join } from 'node:path';
+import { clientAddress, dayCounter, sameSite } from './net.mjs';
 
 const KINDS = { wrong: "Something's wrong", idea: 'An idea', like: 'Something I like', other: 'Other' };
 const MAX_BODY = 8 * 1024 * 1024;
 const MAX_SHOT = 1_500_000;
 const PER_PHONE_A_DAY = 5;
 const PER_ADDRESS_A_DAY = 30;
+/** 0.10.1: however many addresses it comes from, so the disk can't be filled. */
+const ALL_A_DAY = 300;
+/** 0.10.1: wrong inbox passwords, per address and in all, an hour. */
+const WRONG_PER_ADDRESS_AN_HOUR = 20;
+const WRONG_AN_HOUR = 200;
 const IMAGE = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 
 const str = (v, max) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined);
@@ -72,6 +78,7 @@ export function listFeedback(dir) {
 export function feedbackHandler({ dataDir, password = process.env.FEEDBACK_PASSWORD, log = console.log, now = () => new Date() }) {
   const dir = join(dataDir, 'feedback');
   const counts = new Map(); // "<day> <who>" → how many today
+  const wrong = dayCounter({ now, hourly: true });
   const want = password ? Buffer.from(password) : undefined;
   const allowed = (req) => {
     if (!want) return false;
@@ -87,8 +94,10 @@ export function feedbackHandler({ dataDir, password = process.env.FEEDBACK_PASSW
   const page = (res, status, title, body) => {
     res.writeHead(status, {
       'Content-Type': 'text/html; charset=utf-8',
-      'Content-Security-Policy': "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self'",
+      'Content-Security-Policy': "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
       'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+      'Referrer-Policy': 'no-referrer',
       'Cache-Control': 'no-store',
     });
     res.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)}</title>
@@ -110,7 +119,7 @@ img{max-width:100%;border-radius:8px;border:1px solid #e2dccd;margin:6px 0}butto
       return true;
     }
     if (path === '/feedback' && req.method === 'POST') {
-      const who = String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? '').split(',')[0].trim();
+      const who = clientAddress(req);
       let size = 0;
       const parts = [];
       req.on('data', (c) => {
@@ -132,11 +141,13 @@ img{max-width:100%;border-radius:8px;border:1px solid #e2dccd;margin:6px 0}butto
         const phone = str(body?.install, 64) ?? 'unknown';
         const n1 = counts.get(`${day} p:${phone}`) ?? 0;
         const n2 = counts.get(`${day} a:${who}`) ?? 0;
-        if (n1 >= PER_PHONE_A_DAY || n2 >= PER_ADDRESS_A_DAY) return json(res, 429, { error: 'That’s a lot of feedback for one day. Please try again tomorrow.' });
+        const n3 = counts.get(`${day} all`) ?? 0;
+        if (n1 >= PER_PHONE_A_DAY || n2 >= PER_ADDRESS_A_DAY || n3 >= ALL_A_DAY) return json(res, 429, { error: 'That’s a lot of feedback for one day. Please try again tomorrow.' });
         const { item, shots, error } = cleanFeedback(body);
         if (error) return json(res, 400, { error });
         counts.set(`${day} p:${phone}`, n1 + 1);
         counts.set(`${day} a:${who}`, n2 + 1);
+        counts.set(`${day} all`, n3 + 1);
         if (counts.size > 5000) for (const k of counts.keys()) if (!k.startsWith(day)) counts.delete(k);
         const at = now().toISOString();
         const id = `${at.replace(/[-:]/g, '').replace('T', '-').slice(0, 15)}-${randomBytes(3).toString('hex')}`;
@@ -153,7 +164,18 @@ img{max-width:100%;border-radius:8px;border:1px solid #e2dccd;margin:6px 0}butto
       return true;
     }
     if (!path.startsWith('/feedback/inbox')) return false;
+    // 0.10.1: a password can't be guessed over and over.
+    const from = clientAddress(req);
+    if (wrong.get(`a:${from}`) >= WRONG_PER_ADDRESS_AN_HOUR || wrong.get('all') >= WRONG_AN_HOUR) {
+      res.writeHead(429, { 'Content-Type': 'text/plain', 'Retry-After': '3600' });
+      res.end('Too many wrong passwords. Try again in an hour.');
+      return true;
+    }
     if (!allowed(req)) {
+      if (req.headers.authorization) {
+        wrong.bump(`a:${from}`);
+        wrong.bump('all');
+      }
       ask(res);
       return true;
     }
@@ -183,6 +205,11 @@ img{max-width:100%;border-radius:8px;border:1px solid #e2dccd;margin:6px 0}butto
       return true;
     }
     if (rest[1] === 'done' && req.method === 'POST') {
+      // 0.10.1: only from the inbox's own button, never a form on another website.
+      if (!sameSite(req)) {
+        page(res, 403, 'Not from here', '<p>That has to be done from the inbox. <a href="/feedback/inbox">Open the inbox</a></p>');
+        return true;
+      }
       const f = join(dir, id, 'done');
       if (existsSync(f)) rmSync(f);
       else writeFileSync(f, now().toISOString());

@@ -183,22 +183,26 @@ function publish(r) {
     return;
   }
   const dir = join(DATA, 'repo');
-  const url = `https://x-access-token:${token}@github.com/${repo}.git`;
+  // 0.10.1: the token goes with each pull and push only, never into the repo's saved settings (so it
+  // isn't in the data volume, its snapshots or backups). An older copy saved there is taken out.
+  const url = `https://github.com/${repo}.git`;
+  const auth = ['-c', `http.https://github.com/.extraheader=AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`];
   const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] }).toString();
   const quiet = (fn) => {
     try {
       return fn();
     } catch (e) {
       // Never print the token.
-      throw new Error(String(e?.stderr || e?.message || e).replaceAll(token, '***'));
+      const b64 = Buffer.from(`x-access-token:${token}`).toString('base64');
+      throw new Error(String(e?.stderr || e?.message || e).replaceAll(token, '***').replaceAll(b64, '***'));
     }
   };
   if (!existsSync(join(dir, '.git'))) {
     rmSync(dir, { recursive: true, force: true });
-    quiet(() => execFileSync('git', ['clone', '--depth', '1', url, dir], { stdio: ['ignore', 'pipe', 'pipe'] }));
+    quiet(() => execFileSync('git', [...auth, 'clone', '--depth', '1', url, dir], { stdio: ['ignore', 'pipe', 'pipe'] }));
   } else {
     quiet(() => git('remote', 'set-url', 'origin', url));
-    quiet(() => git('pull', '--rebase', '--depth', '1', 'origin', 'HEAD'));
+    quiet(() => git(...auth, 'pull', '--rebase', '--depth', '1', 'origin', 'HEAD'));
   }
   // 0.9.14: window/ too (the day-one files phones download). 0.9.13 wrote them but didn't publish them.
   const subs = ['latest', 'history', 'window'].filter((sub) => existsSync(join(OUT, sub)));
@@ -210,7 +214,7 @@ function publish(r) {
     return;
   }
   git('-c', 'user.name=Restock prices', '-c', `user.email=${process.env.GIT_EMAIL || 'restock-prices@users.noreply.github.com'}`, 'commit', '-q', '-m', `Prices ${today()}`);
-  quiet(() => git('push', '-q', 'origin', 'HEAD'));
+  quiet(() => git(...auth, 'push', '-q', 'origin', 'HEAD'));
   log('publish: pushed to GitHub');
 }
 
