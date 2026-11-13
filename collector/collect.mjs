@@ -186,8 +186,16 @@ function publish(r) {
   // 0.10.1: the token goes with each pull and push only, never into the repo's saved settings (so it
   // isn't in the data volume, its snapshots or backups). An older copy saved there is taken out.
   const url = `https://github.com/${repo}.git`;
-  const auth = ['-c', `http.https://github.com/.extraheader=AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`];
+  // 0.10.5: handed to git in its environment, not on its command line (where any process in the
+  // container could read it from the process list).
+  const authEnv = {
+    ...process.env,
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: 'http.https://github.com/.extraheader',
+    GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`,
+  };
   const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] }).toString();
+  const gitAuth = (...args) => execFileSync('git', args, { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'], env: authEnv }).toString();
   const quiet = (fn) => {
     try {
       return fn();
@@ -199,10 +207,10 @@ function publish(r) {
   };
   if (!existsSync(join(dir, '.git'))) {
     rmSync(dir, { recursive: true, force: true });
-    quiet(() => execFileSync('git', [...auth, 'clone', '--depth', '1', url, dir], { stdio: ['ignore', 'pipe', 'pipe'] }));
+    quiet(() => execFileSync('git', ['clone', '--depth', '1', url, dir], { stdio: ['ignore', 'pipe', 'pipe'], env: authEnv }));
   } else {
     quiet(() => git('remote', 'set-url', 'origin', url));
-    quiet(() => git(...auth, 'pull', '--rebase', '--depth', '1', 'origin', 'HEAD'));
+    quiet(() => gitAuth('pull', '--rebase', '--depth', '1', 'origin', 'HEAD'));
   }
   // 0.9.14: window/ too (the day-one files phones download). 0.9.13 wrote them but didn't publish them.
   const subs = ['latest', 'history', 'window'].filter((sub) => existsSync(join(OUT, sub)));
@@ -214,7 +222,7 @@ function publish(r) {
     return;
   }
   git('-c', 'user.name=Restock prices', '-c', `user.email=${process.env.GIT_EMAIL || 'restock-prices@users.noreply.github.com'}`, 'commit', '-q', '-m', `Prices ${today()}`);
-  quiet(() => git(...auth, 'push', '-q', 'origin', 'HEAD'));
+  quiet(() => gitAuth('push', '-q', 'origin', 'HEAD'));
   log('publish: pushed to GitHub');
 }
 

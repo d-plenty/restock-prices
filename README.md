@@ -61,6 +61,13 @@ There's no key (a free app can't keep one secret), so every price is checked ins
 
 Every limit counts the real internet address (Cloudflare's `CF-Connecting-IP`, or the last address your reverse proxy added), never one the sender wrote, and there are daily caps per address (60,000 prices) and in all (500,000), so the disk can't be filled.
 
+0.10.5: those address headers only count when the request came through a proxy on your own network
+(Cloudflare's tunnel or your reverse proxy, at a private or local address). Straight from the internet,
+the connection's own address counts, so nobody can make up a new address for each request. If nothing
+but your proxy can reach port 8790 and it shows up with a public address, set `TRUST_PROXY=always`;
+`TRUST_PROXY=never` ignores the headers altogether. Pictures are only kept when they're on the shop's
+own picture servers (Coles, Woolworths, Aldi, Costco), so a shared price can't carry a tracking picture.
+
 They wait in `/data/phones/<shop>.ndjson` (and `<shop>-held.ndjson`) until then. Every post is logged
 (`docker logs restock-prices`), for example `share: 34 coles prices from a phone (12 posts, 410 prices today)`,
 and STATUS.md's **From phones** column shows what the last nightly run added.
@@ -94,7 +101,7 @@ each followed by its value: `GITHUB_TOKEN` a fine-grained token for this reposit
 and write** (without one it still collects, and keeps the files in its volume under `/data/out`); `HELPER_KEY`
 any long password, typed into the price helper phone too; `FEEDBACK_PASSWORD` the password for the feedback inbox.
 The token is only ever used for each pull and push; it isn't saved in the repo copy in the volume (0.10.1 takes out a copy an
-older version saved there).
+older version saved there), and from 0.10.5 it's handed to git in its environment, never on its command line.
 Port 8790 takes the price helper's uploads, the prices phones send back and the app's feedback: put it behind your reverse proxy with HTTPS
 (for example `https://restock-prices.plenty.family`).
 

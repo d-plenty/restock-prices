@@ -5,8 +5,34 @@
 // it's the last address in X-Forwarded-For (the one your own reverse proxy added): the first one is
 // whatever the sender wrote, so anyone could pretend to be a new address each time.
 
+/**
+ * 0.10.5: the request came through a proxy on this machine or network (Cloudflare's tunnel, Dockge's
+ * reverse proxy), so its address headers can be believed. Straight from the internet they can't:
+ * anyone could send a made-up CF-Connecting-IP with each request and look like a new phone every
+ * time, getting round the limits and the "second phone agrees" check on shared prices.
+ * TRUST_PROXY=always believes them whatever the address (only if nothing else can reach the port);
+ * TRUST_PROXY=never never does.
+ */
+export function viaProxy(remote, trust = process.env.TRUST_PROXY) {
+  if (trust === 'always') return true;
+  if (trust === 'never') return false;
+  const a = String(remote ?? '').replace(/^::ffff:/i, '');
+  return (
+    a === '::1' ||
+    /^127\./.test(a) ||
+    /^10\./.test(a) ||
+    /^192\.168\./.test(a) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(a) ||
+    /^169\.254\./.test(a) ||
+    /^f[cd][0-9a-f]{2}:/i.test(a) ||
+    /^fe80:/i.test(a)
+  );
+}
+
 /** The address to count a request against. */
 export function clientAddress(req) {
+  const remote = String(req.socket?.remoteAddress ?? '?');
+  if (!viaProxy(remote)) return remote;
   const cf = String(req.headers['cf-connecting-ip'] ?? '').trim();
   if (cf && cf.length <= 64) return cf;
   const fwd = String(req.headers['x-forwarded-for'] ?? '')
@@ -14,7 +40,7 @@ export function clientAddress(req) {
     .map((s) => s.trim())
     .filter(Boolean);
   if (fwd.length) return fwd[fwd.length - 1].slice(0, 64);
-  return String(req.socket?.remoteAddress ?? '?');
+  return remote;
 }
 
 /**

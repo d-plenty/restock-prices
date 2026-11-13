@@ -20,6 +20,27 @@ const MAX_PER_POST = 5000;
 const str = (v, max) => (typeof v === 'string' && v.trim() && v.length <= max ? v.trim() : undefined);
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 && v < 100_000 ? Math.round(v * 100) / 100 : undefined);
 
+/**
+ * 0.10.5: pictures only from the shop's own picture servers. The published files are shown in every
+ * Restock app, so a picture from anywhere else would let whoever sent it see who opened it.
+ */
+export const IMAGE_HOSTS = {
+  coles: ['coles.com.au'],
+  woolworths: ['woolworths.media', 'woolworths.com.au', 'wowlink.com.au'],
+  aldi: ['aldi.cx', 'aldi.com.au'],
+  costco: ['costco.com.au', 'costco-static.com'],
+};
+export function shopImage(chain, url) {
+  if (!url || !/^https:\/\//.test(url)) return undefined;
+  let host;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+  return (IMAGE_HOSTS[chain] ?? []).some((h) => host === h || host.endsWith(`.${h}`)) ? url : undefined;
+}
+
 /** One product as the phone sent it, checked and tidied, or undefined. `today`: YYYY-MM-DD. */
 export function cleanProduct(chain, p, today) {
   if (!p || typeof p !== 'object') return undefined;
@@ -42,7 +63,7 @@ export function cleanProduct(chain, p, today) {
     brand: str(p.brand, 80),
     size,
     barcode: /^\d{8,14}$/.test(String(p.barcode ?? '')) ? String(p.barcode) : undefined,
-    image_url: image && /^https:\/\//.test(image) ? image : undefined,
+    image_url: shopImage(chain, image),
     ...readSize(size, name),
     day: day > today ? today : day,
     price: {

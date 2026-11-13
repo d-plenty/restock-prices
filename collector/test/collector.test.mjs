@@ -350,8 +350,12 @@ test('0.10.1: limits count the real address, wrong passwords are limited, done o
   const { startHelper } = await import('../lib/helper.mjs');
   const { clientAddress } = await import('../lib/net.mjs');
   // The first X-Forwarded-For entry is whatever the sender wrote; Cloudflare's own header wins.
-  assert.equal(clientAddress({ headers: { 'x-forwarded-for': 'made-up, 203.0.113.9' }, socket: {} }), '203.0.113.9');
-  assert.equal(clientAddress({ headers: { 'cf-connecting-ip': '198.51.100.4', 'x-forwarded-for': 'made-up' }, socket: {} }), '198.51.100.4');
+  const local = { remoteAddress: '172.18.0.2' };
+  assert.equal(clientAddress({ headers: { 'x-forwarded-for': 'made-up, 203.0.113.9' }, socket: local }), '203.0.113.9');
+  assert.equal(clientAddress({ headers: { 'cf-connecting-ip': '198.51.100.4', 'x-forwarded-for': 'made-up' }, socket: local }), '198.51.100.4');
+  // 0.10.5: straight from the internet, the headers are whatever the sender wrote: its own address counts.
+  assert.equal(clientAddress({ headers: { 'cf-connecting-ip': '198.51.100.4' }, socket: { remoteAddress: '203.0.113.50' } }), '203.0.113.50');
+  assert.equal(clientAddress({ headers: { 'x-forwarded-for': '1.2.3.4' }, socket: { remoteAddress: '::ffff:203.0.113.50' } }), '::ffff:203.0.113.50');
   const dir = mkdtempSync(join(tmpdir(), 'rp-net-'));
   const server = startHelper({ dataDir: dir, key: undefined, port: 0, today: () => '2026-11-12', log: () => {}, feedbackPassword: 'pw' });
   await new Promise((r) => server.once('listening', r));
@@ -383,4 +387,16 @@ test('0.10.1: limits count the real address, wrong passwords are limited, done o
   } finally {
     server.close();
   }
+});
+
+test('0.10.5: shared prices keep pictures only from the shop\'s own servers', async () => {
+  const { cleanProduct, shopImage } = await import('../lib/helper.mjs');
+  assert.equal(shopImage('coles', 'https://productimages.coles.com.au/a.jpg'), 'https://productimages.coles.com.au/a.jpg');
+  assert.equal(shopImage('woolworths', 'https://cdn0.woolworths.media/x.jpg'), 'https://cdn0.woolworths.media/x.jpg');
+  assert.equal(shopImage('coles', 'https://evil.example/coles.com.au.jpg'), undefined);
+  assert.equal(shopImage('coles', 'https://notcoles.com.au/a.jpg'), undefined);
+  assert.equal(shopImage('aldi', 'http://dm.apac.cms.aldi.cx/a.jpg'), undefined);
+  const p = cleanProduct('coles', { store_product_id: '1', name: 'Milk', price: { price: 3 }, day: '2026-11-12', image_url: 'https://tracker.example/p.gif' }, '2026-11-12');
+  assert.equal(p.image_url, undefined);
+  assert.equal(p.name, 'Milk');
 });
