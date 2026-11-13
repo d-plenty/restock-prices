@@ -297,8 +297,13 @@ test('0.9.14 prices from phones: no key, checked, the collector wins, odd ones w
   const server = startHelper({ dataDir: dir, key: 'sekrit', port: 0, today: () => '2026-11-12', log: () => {} });
   await new Promise((r) => server.once('listening', r));
   const base = `http://127.0.0.1:${server.address().port}`;
-  const send = (install, chain, products) =>
-    fetch(`${base}/share/prices`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ format: 'restock-share', v: 1, install, chain, products }) });
+  // Each phone from its own internet address (as Cloudflare says), unless told otherwise.
+  const send = (install, chain, products, from = `198.51.100.${install.length + install.charCodeAt(install.length - 1) % 200}`) =>
+    fetch(`${base}/share/prices`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': from },
+      body: JSON.stringify({ format: 'restock-share', v: 1, install, chain, products }),
+    });
   const p = (id, price, day = '2026-11-11', extra = {}) => ({ store_product_id: id, name: `Thing ${id}`, price: { price }, day, ...extra });
   try {
     assert.equal((await send('phone-aaaa', 'bws', [p('1', 3)])).status, 400); // not a shop that's collected
@@ -323,8 +328,13 @@ test('0.9.14 prices from phones: no key, checked, the collector wins, odd ones w
     assert.deepEqual(state.products['aldi:400'].prices, [{ date: '2026-11-11', price: 4 }]);
     assert.equal(r.held, 2);
     assert.equal(r.phones, 2);
-    // A second phone agrees about 200 at $9 (bread went up?): in it goes at the next fold.
-    assert.equal((await send('phone-cccc', 'aldi', [p('200', 9)])).status, 200);
+    // 0.10.2: a "second phone" from the same internet address (made-up install numbers, the first phone's connection) doesn't count.
+    assert.equal((await send('phone-fake1', 'aldi', [p('200', 9)], '198.51.100.107')).status, 200);
+    assert.equal((await send('phone-fake2', 'aldi', [p('200', 9)], '198.51.100.107')).status, 200);
+    assert.equal(foldPhones(state, 'aldi', dir, '2026-11-12').held, 4); // each phone's copy waits (200 three times, 400 at $1)
+    assert.deepEqual(state.products['aldi:200'].prices, [{ date: '2026-11-01', price: 3 }]);
+    // A second phone on another connection agrees about 200 at $9 (bread went up?): in it goes at the next fold.
+    assert.equal((await send('phone-cccc', 'aldi', [p('200', 9)], '203.0.113.50')).status, 200);
     const r2 = foldPhones(state, 'aldi', dir, '2026-11-12');
     assert.deepEqual(state.products['aldi:200'].prices.at(-1), { date: '2026-11-11', price: 9 });
     assert.equal(r2.held, 1); // 400 at $1 still waits

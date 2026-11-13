@@ -13,8 +13,13 @@
 //    sends the same price (for up to 14 days).
 // The internet address is never written down. The install number is kept only as a short hash,
 // to tell two phones apart.
+//
+// 0.10.1-collector (with Restock 0.10.2): "a second phone" means a second internet address, not just
+// a second install number (anyone can make those up). Which addresses sent which price is kept in
+// memory only, as a hash with a random salt made when the collector starts, for 14 days at most; a
+// restart forgets it, and a waiting price then waits for the next phone, as it already could.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { cleanProduct } from './helper.mjs';
 import { put } from './store.mjs';
@@ -35,6 +40,39 @@ const LOW = 0.35;
 const HIGH = 2.5;
 
 const hash = (s) => createHash('sha256').update(`restock-share:${s}`).digest('hex').slice(0, 12);
+
+// In memory only: "id day cents" → { day, addresses: Set of salted hashes }.
+const SALT = randomBytes(16).toString('hex');
+const seenFrom = new Map();
+const MAX_SEEN = 400_000;
+const keyOf = (p) => `${p.id} ${p.day} ${Math.round((p.price?.price ?? 0) * 100)}`;
+
+/** Notes that an internet address sent this price (memory only, never written down). */
+export function noteAddress(p, who, today) {
+  const k = keyOf(p);
+  let e = seenFrom.get(k);
+  if (!e) {
+    if (seenFrom.size >= MAX_SEEN) forgetOld(today, true);
+    e = { day: p.day, addresses: new Set() };
+    seenFrom.set(k, e);
+  }
+  if (e.addresses.size < 8) e.addresses.add(createHash('sha256').update(`${SALT}:${who}`).digest('hex').slice(0, 16));
+}
+
+/** How many different internet addresses sent this price since the collector started. */
+export const addressesFor = (p) => seenFrom.get(keyOf(p))?.addresses.size ?? 0;
+
+/** Lets go of prices older than the 14 days a price can wait (or, when full, the older half). */
+export function forgetOld(today, full = false) {
+  for (const [k, e] of seenFrom) if (daysBetween(e.day, today) > HOLD_DAYS) seenFrom.delete(k);
+  if (full && seenFrom.size >= MAX_SEEN) {
+    let n = 0;
+    for (const k of seenFrom.keys()) {
+      if (n++ > MAX_SEEN / 2) break;
+      seenFrom.delete(k);
+    }
+  }
+}
 
 export function shareHandler({ dataDir, log = console.log, now = () => new Date(), today }) {
   const dir = join(dataDir, 'phones');
@@ -98,6 +136,7 @@ export function shareHandler({ dataDir, log = console.log, now = () => new Date(
       bump(`${day} na:${who}`, kept.length);
       bump(`${day} all`, kept.length);
       if (counts.size > 20_000) for (const k of counts.keys()) if (!k.startsWith(day)) counts.delete(k);
+      for (const p of kept) noteAddress(p, who, t);
       if (kept.length) {
         mkdirSync(dir, { recursive: true });
         appendFileSync(join(dir, `${chain}.ndjson`), kept.map((p) => JSON.stringify({ ...p, from: phone })).join('\n') + '\n');
@@ -183,7 +222,8 @@ export function foldPhones(state, shop, dataDir, today) {
       if (p.from) phones.add(p.from); // the same reading from another phone
       continue;
     }
-    const twoPhones = (agree.get(k)?.size ?? 0) >= 2;
+    // Two phones (install numbers) from two different internet addresses.
+    const twoPhones = (agree.get(k)?.size ?? 0) >= 2 && addressesFor(p) >= 2;
     const cur = state.products[p.id];
     const last = cur ? lastBefore(cur.prices, p.day) : undefined;
     const odd = !cur || (last && (p.price.price < last.price * LOW || p.price.price > last.price * HIGH));
@@ -209,6 +249,7 @@ export function foldPhones(state, shop, dataDir, today) {
     if (put(prod.prices, point, { keep: true })) changed++;
   }
   done(held);
+  forgetOld(today);
   return { count, changed, held: held.length, phones: phones.size };
 }
 

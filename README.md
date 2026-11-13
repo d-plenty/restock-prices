@@ -54,6 +54,7 @@ about the person, just a random number per install.
 
 There's no key (a free app can't keep one secret), so every price is checked instead:
 - each phone can send 200 times and 20,000 prices a day, and each internet address 600 times (counted in memory; the address is never written down);
+- a price far from the last one, or a product the collector hasn't seen, waits until two phones on **two different internet addresses** send it (0.10.2: which addresses sent what is kept in memory only, as a code scrambled with a random salt made at start-up, for up to 14 days; a restart forgets it);
 - products are tidied as the helper phone's are: sensible prices, the last fortnight only;
 - **every night at 3:00 am** (`NIGHTLY_TIME`) they're added to the shops' history and the files are published. A phone never replaces the collector's or the helper phone's own reading for a day, and never renames a product the collector knows;
 - a price far from the last known one (under 35% or over 2.5 times it), or a product the collector hasn't seen, waits until a second phone sends the same price, for up to 14 days.
