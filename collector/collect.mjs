@@ -23,7 +23,7 @@ export const SHOP_CODE = { woolworths, coles, aldi, costco };
 const DATA = process.env.DATA_DIR || '/data';
 const OUT = join(DATA, 'out');
 const STATE = join(DATA, 'state');
-const SHOPS = (process.env.SHOPS || 'woolworths,coles,aldi,costco')
+const SHOPS = (process.env.SHOPS || 'woolworths,coles,aldi')
   .split(',')
   .map((s) => s.trim().toLowerCase())
   .filter((s) => SHOP_CODE[s]);

@@ -1,7 +1,7 @@
 # Restock prices
 
-Australian supermarket prices for [Restock](https://github.com/d-plenty/Restock): Coles, Woolworths, Aldi and
-Costco, collected every Thursday and added to every night from the prices Restock phones send back. One file per
+Australian supermarket prices for [Restock](https://github.com/d-plenty/Restock): Coles, Woolworths and Aldi,
+collected every Thursday and added to every night from the prices Restock phones send back. One file per
 shop with products, sizes, barcodes (where the shop shows them) and price history. Restock's **Shared prices**
 (Settings → Privacy and sharing) uses it to know a product's usual price and usual sale price straight
 away. Phones download only the shops they use, for 8 weeks, 6 months or 12 months, weekly or every day.
@@ -19,7 +19,7 @@ Not affiliated with any shop. Read [NOTICE-DATA.md](NOTICE-DATA.md) before using
 | `history/<shop>/<year>.json.gz` | Prices older than a year, by product. |
 | `STATUS.md` | The last run: how many products each shop returned, whether it worked, how many prices came from the price helper phone and from phones, last night's prices from phones (and how many are waiting for a second phone), and the size of each day-one download. |
 
-Shops: `woolworths`, `coles`, `aldi`, `costco`. A price is only written when it changes (price, was-price,
+Shops: `woolworths`, `coles`, `aldi`. (`costco` was collected until Restock 0.11.3; its files are still here but no longer updated.) A price is only written when it changes (price, was-price,
 special, member-only or promo), so the files stay small. Sizes are also given as `qty` + `qty_unit` (`g`, `ml`
 or `ea`), so per-litre and per-kilo prices can be compared.
 
@@ -46,8 +46,8 @@ that failed or returned far fewer products than last time.
 
 ## Prices from phones (Shared prices)
 
-Restock 0.9.14 and later send the shelf prices their searches and price checks read from Coles, Woolworths, Aldi
-and Costco here, to `https://<this address>/share/prices`, unless the person turned **Shared prices** off
+Restock 0.9.14 and later send the shelf prices their searches and price checks read from Coles, Woolworths and
+Aldi here, to `https://<this address>/share/prices`, unless the person turned **Shared prices** off
 (Settings → Privacy and sharing; it was called Send prices back in 0.9.14). Only what the shop's website said:
 never a price typed in by hand, never a price synced from another of the household's phones (0.10.0), and nothing
 about the person, just a random number per install.
@@ -115,7 +115,7 @@ docker logs restock-prices                                   # what it did
 
 | Setting | Default | |
 |---|---|---|
-| `SHOPS` | `woolworths,coles,aldi,costco` | which shops to collect |
+| `SHOPS` | `woolworths,coles,aldi` | which shops to collect |
 | `RUN_DAY` / `RUN_TIME` | `thu` / `01:00` | when (the container's `TZ`) |
 | `RETRY_DAY` | `fri` | the retry for a shop that failed or came back short |
 | `DELAY_MS` | `1500` | pause between requests to a shop |

@@ -9,7 +9,7 @@ services:
     restart: unless-stopped
     environment:
       - TZ=Australia/Brisbane
-      - SHOPS=woolworths,coles,aldi,costco   # Costco's website terms ask people not to collect its listings. Remove costco to leave it out.
+      - SHOPS=woolworths,coles,aldi          # Costco is no longer collected (Restock 0.11.3). Its past files stay in latest/ and window/.
       - RUN_DAY=thu
       - RUN_TIME=01:00
       - RETRY_DAY=fri

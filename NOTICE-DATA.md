@@ -1,8 +1,9 @@
 # About the price data
 
 The files in `latest/` and `history/` are prices and product details that were publicly shown on the
-websites of Coles, Woolworths, Aldi and Costco Australia, collected about once a week by the collector in
-`collector/`.
+websites of Coles, Woolworths and Aldi, collected about once a week by the collector in
+`collector/`. Costco Australia was collected until November 2026; its files are still here and are no
+longer updated.
 
 - **Not affiliated.** This project isn't connected with, endorsed by or sponsored by Coles, Woolworths, Aldi
   or Costco. Their names, product names, brands and pictures belong to them. Picture links point at the

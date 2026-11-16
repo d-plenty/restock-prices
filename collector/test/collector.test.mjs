@@ -308,6 +308,9 @@ test('0.9.14 prices from phones: no key, checked, the collector wins, odd ones w
   try {
     assert.equal((await send('phone-aaaa', 'bws', [p('1', 3)])).status, 400); // not a shop that's collected
     assert.equal((await send('x', 'coles', [p('1', 3)])).status, 400); // no install number
+    // Restock 0.11.3: Costco is no longer shared. An older phone is told ok, and nothing is kept.
+    assert.deepEqual(await (await send('phone-cccc', 'costco', [p('51210', 20)])).json(), { ok: true, kept: 0, retired: true });
+    assert.equal(foldPhones({ products: {} }, 'costco', dir, '2026-11-12').count, 0);
     const ok = await send('phone-aaaa', 'aldi', [p('100', 3.49), p('200', 9), p('300', 2.5), p('400', 4), p('400', 1, '2026-11-11'), { name: 'no id' }]);
     assert.deepEqual(await ok.json(), { ok: true, kept: 5 });
     assert.equal((await send('phone-bbbb', 'aldi', [p('400', 4)])).status, 200);

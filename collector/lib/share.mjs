@@ -1,5 +1,5 @@
 // Restock 0.9.14: "Send prices back". Every Restock phone with it on (the default) sends the shelf
-// prices it reads from Coles, Woolworths, Aldi and Costco (searches and price checks) here:
+// prices it reads from Coles, Woolworths and Aldi (searches and price checks) here:
 //   POST /share/prices  { format: "restock-share", v: 1, install, chain, products: [ … ] }
 // Each product is the same shape as a price helper phone's (lib/helper.mjs cleanProduct). Only what
 // the shop's own website said: never prices typed in by hand, and nothing about the person.
@@ -25,7 +25,10 @@ import { cleanProduct } from './helper.mjs';
 import { put } from './store.mjs';
 import { clientAddress } from './net.mjs';
 
-export const SHARE_SHOPS = ['coles', 'woolworths', 'aldi', 'costco'];
+export const SHARE_SHOPS = ['coles', 'woolworths', 'aldi'];
+// Restock 0.11.3 stopped sharing Costco. Older phones still send it: they get a plain "ok" and
+// nothing is kept, so they don't keep trying and nothing piles up on disk.
+export const RETIRED_SHARE_SHOPS = ['costco'];
 const MAX_BODY = 4 * 1024 * 1024;
 const MAX_PER_POST = 2000;
 const POSTS_PER_PHONE_A_DAY = 200;
@@ -115,6 +118,7 @@ export function shareHandler({ dataDir, log = console.log, now = () => new Date(
       }
       const chain = body?.chain;
       const install = typeof body?.install === 'string' && /^[\w-]{6,64}$/.test(body.install) ? body.install : undefined;
+      if (body?.format === 'restock-share' && RETIRED_SHARE_SHOPS.includes(chain)) return json(res, 200, { ok: true, kept: 0, retired: true });
       if (body?.format !== 'restock-share' || !SHARE_SHOPS.includes(chain) || !install || !Array.isArray(body.products) || body.products.length > MAX_PER_POST)
         return json(res, 400, { error: 'not a Restock price share' });
       const day = now().toISOString().slice(0, 10);
