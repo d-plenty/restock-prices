@@ -11,6 +11,9 @@
 
 | Shop | When | From the price helper phone | From phones | Phones | Waiting for a second phone | New prices |
 |---|---|---|---|---|---|---|
+| woolworths | 2026-11-18T17:00:17.404Z | 0 | 0 | 0 | 26 | 0 |
+| coles | 2026-11-18T17:00:19.719Z | 0 | 0 | 0 | 149 | 0 |
+| aldi | 2026-11-18T17:00:19.984Z | – | 0 | 0 | 147 | 0 |
 | costco | 2026-11-15T17:00:19.379Z | – | 0 | 0 | 347 | 0 |
 
 # Day-one downloads (what a phone downloads for each shop)
