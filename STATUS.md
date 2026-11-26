@@ -11,16 +11,16 @@
 
 | Shop | When | From the price helper phone | From phones | Phones | Waiting for a second phone | New prices |
 |---|---|---|---|---|---|---|
-| woolworths | 2026-11-25T17:00:07.462Z | 0 | 0 | 0 | 92 | 0 |
-| coles | 2026-11-25T17:00:10.366Z | 0 | 0 | 0 | 200 | 0 |
-| aldi | 2026-11-25T17:00:10.732Z | – | 0 | 0 | 218 | 0 |
+| woolworths | 2026-11-26T17:00:11.101Z | 0 | 3529 | 3 | 128 | 920 |
+| coles | 2026-11-26T17:00:14.246Z | 0 | 655 | 3 | 210 | 157 |
+| aldi | 2026-11-26T17:00:14.770Z | – | 384 | 3 | 230 | 0 |
 | costco | 2026-11-15T17:00:19.379Z | – | 0 | 0 | 347 | 0 |
 
 # Day-one downloads (what a phone downloads for each shop)
 
 | Shop | Products | 8 weeks | 6 months | 12 months |
 |---|---|---|---|---|
-| woolworths | 24956 | 252 KB | 529 KB | 789 KB |
-| coles | 25047 | 210 KB | 270 KB | 331 KB |
+| woolworths | 24956 | 254 KB | 521 KB | 792 KB |
+| coles | 25047 | 211 KB | 267 KB | 332 KB |
 | aldi | 3020 | 17 KB | 17 KB | 17 KB |
 | costco | 1580 | 8 KB | 8 KB | 8 KB |
